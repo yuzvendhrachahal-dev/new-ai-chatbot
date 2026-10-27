@@ -89,7 +89,8 @@ async def start_chat(payload: StartChatRequest):
     if not conv:
         raise HTTPException(status_code=500, detail="Failed to initialize conversation session.")
 
-    welcome_msg = conv["messages"][0].text
+    welcome_item = conv["messages"][0]
+    welcome_msg = welcome_item.text
 
     # Notify connected agents about the new session
     analytics = store.get_analytics()
@@ -103,6 +104,7 @@ async def start_chat(payload: StartChatRequest):
     return StartChatResponse(
         conversation_id=conv_id,
         welcome_message=welcome_msg,
+        welcome_message_id=welcome_item.id,
         customer=customer
     )
 

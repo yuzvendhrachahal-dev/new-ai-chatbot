@@ -7,6 +7,7 @@ export const chatApi = {
   async startChat(lead: CustomerLead & { initial_query?: string }): Promise<{
     conversation_id: string;
     welcome_message: string;
+    welcome_message_id?: string;
     customer: CustomerLead;
   }> {
     const res = await fetch(`${API_BASE}/chat/start`, {

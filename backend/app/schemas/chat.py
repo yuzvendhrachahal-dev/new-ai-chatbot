@@ -24,6 +24,7 @@ class StartChatRequest(BaseModel):
 class StartChatResponse(BaseModel):
     conversation_id: str
     welcome_message: str
+    welcome_message_id: Optional[str] = None
     customer: CustomerLead
 
 class SendMessageRequest(BaseModel):

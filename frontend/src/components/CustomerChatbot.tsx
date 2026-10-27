@@ -72,17 +72,6 @@ const isIgnoredSystemMessage = (m: MessageItem) => {
   return false;
 };
 
-const isWelcomeGreeting = (m: MessageItem) => {
-  if (!m || m.sender !== 'assistant' || !m.text) return false;
-  const t = m.text.toLowerCase().trim();
-  return (
-    t.startsWith('namaste') ||
-    t.startsWith('the cosmos awaits') ||
-    m.id === 'msg-welcome' ||
-    m.id.endsWith('-welcome')
-  );
-};
-
 const mergeMessageList = (prev: MessageItem[], incoming: MessageItem[]): MessageItem[] => {
   if (!incoming || incoming.length === 0) return prev;
 
@@ -90,7 +79,7 @@ const mergeMessageList = (prev: MessageItem[], incoming: MessageItem[]): Message
   const sanitizedIncoming = incoming.filter(m => !isIgnoredSystemMessage(m));
   if (sanitizedIncoming.length === 0) return prev;
 
-  const result = (prev || []).filter(m => !isIgnoredSystemMessage(m));
+  const result = [...(prev || []).filter(m => !isIgnoredSystemMessage(m))];
 
   for (const inc of sanitizedIncoming) {
     if (!inc || !inc.id) continue;
@@ -118,41 +107,47 @@ const mergeMessageList = (prev: MessageItem[], incoming: MessageItem[]): Message
       }
     }
 
-    // 3. Welcome message deduplication: ensure only ONE welcome greeting exists in conversation
-    if (isWelcomeGreeting(inc)) {
-      const existingWelcomeIdx = result.findIndex(isWelcomeGreeting);
-      if (existingWelcomeIdx !== -1) {
-        // Upgrade temporary welcome with canonical server welcome, but never keep both
-        result[existingWelcomeIdx] = inc;
-        continue;
-      }
+    // 3. Initial welcome message reconciliation:
+    // Only reconcile if result[0] is an in-flight client welcome placeholder (e.g. id 'msg-welcome')
+    // and incoming is the canonical server welcome message for the session.
+    // Never mutate, replace, or overwrite the initial welcome when answering greetings like 'hi'.
+    if (
+      inc.sender === 'assistant' &&
+      result.length > 0 &&
+      (result[0].id === 'msg-welcome' || result[0].id.startsWith('msg-welcome')) &&
+      (result[0].text.trim() === inc.text.trim() || inc.text.includes('Vedic AI Astrology guide'))
+    ) {
+      result[0] = inc;
+      continue;
     }
 
-    // 4. Fallback deduplication: same sender, same text, and timestamps within 4 seconds
+    // 4. Fallback deduplication: same sender, same text, and timestamps within 3 seconds
+    // Only applies if matching against an in-flight optimistic client message (user-* or temp-*)
     const incTime = new Date(inc.timestamp || 0).getTime();
     const dupIndex = result.findIndex(
       m => m.sender === inc.sender &&
            m.text.trim() === inc.text.trim() &&
-           ((m.id.startsWith('user-') || m.id.startsWith('temp-') || m.id.startsWith('msg-') || !m.timestamp) && Math.abs(new Date(m.timestamp || 0).getTime() - incTime) < 4000)
+           (m.id.startsWith('user-') || m.id.startsWith('temp-')) &&
+           Math.abs(new Date(m.timestamp || 0).getTime() - incTime) < 3000
     );
-    if (dupIndex !== -1 && (result[dupIndex].id.startsWith('user-') || result[dupIndex].id.startsWith('temp-') || result[dupIndex].id.startsWith('msg-welcome'))) {
+    if (dupIndex !== -1) {
       result[dupIndex] = inc;
       continue;
     }
 
-    // 5. Append new message
+    // 5. Append new distinct message
     result.push(inc);
   }
 
-  // Final check: if result contains multiple welcome greetings, retain only the canonical one
-  const welcomeIndices: number[] = [];
-  result.forEach((m, idx) => {
-    if (isWelcomeGreeting(m)) welcomeIndices.push(idx);
+  // Preserve stable chronological order by timestamp
+  result.sort((a, b) => {
+    const tA = new Date(a.timestamp || 0).getTime();
+    const tB = new Date(b.timestamp || 0).getTime();
+    if (!isNaN(tA) && !isNaN(tB) && tA !== tB && tA > 0 && tB > 0) {
+      return tA - tB;
+    }
+    return 0;
   });
-  if (welcomeIndices.length > 1) {
-    const keepIdx = welcomeIndices[welcomeIndices.length - 1];
-    return result.filter((_, idx) => !welcomeIndices.includes(idx) || idx === keepIdx);
-  }
 
   return result;
 };
@@ -471,11 +466,12 @@ export const CustomerChatbot: React.FC<CustomerChatbotProps> = () => {
       setCustomer(res.customer);
       saveSessionId(res.conversation_id);
 
-      // Single initial greeting using the backend-generated text
+      // Single initial greeting using the backend-generated text and canonical ID
       const welcomeText = res.welcome_message || `Namaste ${trimmedName}! Welcome to AstroVed. I am your Vedic AI Astrology guide. How may I assist your life path, birth chart queries, or remedies today?`;
+      const welcomeId = res.welcome_message_id || `msg-welcome`;
       const initialMsgs: MessageItem[] = [
         {
-          id: `msg-welcome`,
+          id: welcomeId,
           sender: 'assistant',
           text: welcomeText,
           timestamp: new Date().toISOString()

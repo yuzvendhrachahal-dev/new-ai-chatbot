@@ -38,9 +38,14 @@ dist/
 
 # Environment & Secrets
 .env
+.env.*
+*.env
+backend/.env
+backend/.env.*
 *.env.local
 *.env.*.local
-backend/.env
+!.env.example
+!backend/.env.example
 
 # IDE & OS
 .DS_Store
