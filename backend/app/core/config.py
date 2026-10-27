@@ -9,8 +9,21 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    MONGODB_URI: str = os.getenv("MONGODB_URI", "")
-    MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "astroved_ai")
+    
+    # MongoDB Configuration
+    MONGODB_URI: str = os.getenv("MONGODB_URI", "mongodb://127.0.0.1:27017/")
+    MONGODB_DATABASE: str = os.getenv("MONGODB_DATABASE", os.getenv("MONGODB_DB_NAME", "astroved-chatbot"))
+    
+    # Backwards-compatible alias
+    @property
+    def MONGODB_DB_NAME(self) -> str:
+        return self.MONGODB_DATABASE
+    
+    # JWT Agent Authentication
+    JWT_SECRET: str = os.getenv("JWT_SECRET", "astroved-super-secret-jwt-key-2026-production")
+    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+    JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "720"))
+
     INTERNAL_AGENT_KEY: str = os.getenv("INTERNAL_AGENT_KEY", "astro-agent-secret-token")
     CORS_ORIGINS: list[str] = ["*"]
 

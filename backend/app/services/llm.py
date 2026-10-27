@@ -1,60 +1,68 @@
 import httpx
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from app.core.config import settings
+from app.services.knowledge import knowledge_service
+from app.services.intent import detect_greeting_intent
 
 ASTROVED_SYSTEM_PROMPT = """You are AstroVed AI, a warm, compassionate, and knowledgeable Vedic Astrology assistant representing AstroVed.
 Your goal is to guide seekers regarding Vedic Astrology principles, planetary transits (Gochar), Nakshatras, Dasha cycles, Pooja remedies, Homa, and spiritual gemstone suggestions.
 Always speak with reverence and positivity. Encourage spiritual remedies, mantras, and personalized birth chart consultations where appropriate.
-Keep answers concise, insightful, and well-structured with clear bullet points when appropriate."""
+If verified reference context is provided, base your answer on it and include the source reference citation.
+Never fabricate facts, prices, or booking URLs.
+Keep answers concise, insightful, and well-structured."""
 
-MOCK_RESPONSES = [
-    {
-        "keywords": ["career", "job", "profession", "business"],
-        "reply": "In Vedic Astrology, the 10th House (Karma Bhava) and its planetary ruler, along with Saturn (the Karaka of career) and the current Mahadasha, determine your professional trajectory. To bring clarity and overcome workplace hurdles, chanting the **Hanuman Chalisa** on Tuesdays or performing a **Ganesha Pooja** helps clear obstacles."
-    },
-    {
-        "keywords": ["marriage", "relationship", "love", "spouse", "partner"],
-        "reply": "Matters of relationships and marital harmony are illuminated by the 7th House, Venus (Shukra), and Jupiter (Guru). If you are experiencing delays or misunderstandings, strengthening Venus with Friday Lakshmi prayers and wearing clean, pastel shades fosters peace and mutual understanding."
-    },
-    {
-        "keywords": ["health", "stress", "peace", "healing"],
-        "reply": "Physical and mental well-being are governed by the 1st House (Lagna), Sun (Vitality), and Moon (Mind/Manas). Chanting the **Maha Mrityunjaya Mantra** 108 times and offering Arghya (water) to Surya Deva at sunrise instills prana and serenity."
-    },
-    {
-        "keywords": ["wealth", "finance", "money", "debt"],
-        "reply": "Wealth prosperity reflects the 2nd House (Dhana Bhava) and 11th House (Labha Bhava), energized by Lord Kubera and Goddess Mahalakshmi. Maintaining gratitude, lighting a ghee lamp in the North-East corner at twilight, and reciting **Sri Suktam** invites abundance."
-    },
-    {
-        "keywords": ["sani", "saturn", "sade sati", "rahu", "ketu"],
-        "reply": "Navagraha transits, particularly Sade Sati or Rahu-Ketu nodal shifts, are karmic cleansing periods designed for profound spiritual growth. Lighting sesame oil lamps on Saturdays for Lord Shani and feeding crows or the needy transforms karmic friction into spiritual resilience."
-    }
-]
-
-DEFAULT_MOCK_REPLY = (
-    "Namaste. According to Vedic principles, every cosmic movement in the celestial sphere corresponds with your inner consciousness. "
-    "To look deeply into your planetary placements, Lagna, and current Vimshottari Dasha, our AstroVed Vedic Astrologers can evaluate your exact date, time, and birthplace. "
-    "What specific area of life—Career, Relationship, Wealth, or Spiritual Growth—would you like to explore right now?"
+HONEST_FALLBACK = (
+    "Namaste. Our verified AstroVed knowledge base does not currently contain detailed astrological documentation for this specific query. "
+    "According to Vedic principles, every cosmic placement is unique to your exact birth time, date, and coordinate. "
+    "Would you like to connect with an AstroVed Astrology Advisor or explore queries about Career, Relationships, Dasha, or Remedial Poojas?"
 )
 
 class LLMService:
     @staticmethod
-    async def get_response(user_message: str, history: List[Dict[str, str]] = None) -> tuple[str, bool]:
+    async def get_response(user_message: str, history: List[Dict[str, str]] = None) -> Tuple[str, bool, List[Dict]]:
         """
-        Returns (response_text, is_mock).
-        Uses OpenAI if OPENAI_API_KEY is configured, else provides domain-rich Vedic mock responses.
+        Retrieves approved knowledge from knowledge_service and generates answer.
+        Returns: (response_text, is_mock, sources)
         """
-        api_key = settings.OPENAI_API_KEY.strip()
-        
-        if not api_key:
-            # Deterministic domain mock response
-            msg_lower = user_message.lower()
-            for item in MOCK_RESPONSES:
-                if any(kw in msg_lower for kw in item["keywords"]):
-                    return item["reply"], True
-            return DEFAULT_MOCK_REPLY, True
+        # Guard: Check greeting / gratitude / small talk before RAG retrieval
+        greeting = detect_greeting_intent(user_message)
+        if greeting:
+            return greeting, True, []
 
+        retrieved_docs = knowledge_service.retrieve(user_message, top_k=2)
+        api_key = settings.OPENAI_API_KEY.strip()
+
+        # Build citations list
+        sources = []
+        for doc in retrieved_docs:
+            sources.append({
+                "title": doc.get("title"),
+                "source": doc.get("source"),
+                "document_id": doc.get("document_id")
+            })
+
+        # If OpenAI API key is NOT configured, use approved retrieved knowledge
+        if not api_key:
+            if retrieved_docs:
+                doc = retrieved_docs[0]
+                answer_text = doc["content"]
+                
+                # Format with source citation matching reference Image 4
+                source_links = "\n".join([f"- [{d['title']} | AstroVed.com]({d['source']})" for d in sources])
+                full_reply = f"{answer_text}\n\nSource:\n{source_links}"
+                return full_reply, True, sources
+            else:
+                return HONEST_FALLBACK, True, []
+
+        # If OpenAI is configured, call OpenAI with RAG context
         try:
-            messages = [{"role": "system", "content": ASTROVED_SYSTEM_PROMPT}]
+            context_text = "\n\n".join([f"Document: {d['title']}\nContent: {d['content']}\nSource: {d['source']}" for d in retrieved_docs])
+            
+            system_prompt = ASTROVED_SYSTEM_PROMPT
+            if context_text:
+                system_prompt += f"\n\nApproved AstroVed Knowledge:\n{context_text}\nPlease incorporate and cite these sources at the end."
+
+            messages = [{"role": "system", "content": system_prompt}]
             if history:
                 messages.extend(history)
             messages.append({"role": "user", "content": user_message})
@@ -76,10 +84,14 @@ class LLMService:
                 if res.status_code == 200:
                     data = res.json()
                     answer = data["choices"][0]["message"]["content"]
-                    return answer, False
+                    return answer, False, sources
                 else:
-                    return f"[AI Provider Notice: Status {res.status_code}]. " + DEFAULT_MOCK_REPLY, True
+                    return f"[AI Provider Notice: Status {res.status_code}].\n" + HONEST_FALLBACK, True, sources
         except Exception:
-            return DEFAULT_MOCK_REPLY, True
+            if retrieved_docs:
+                doc = retrieved_docs[0]
+                source_links = "\n".join([f"- [{d['title']} | AstroVed.com]({d['source']})" for d in sources])
+                return f"{doc['content']}\n\nSource:\n{source_links}", True, sources
+            return HONEST_FALLBACK, True, []
 
 llm_service = LLMService()
