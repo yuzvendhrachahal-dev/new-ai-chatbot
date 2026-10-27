@@ -1,7 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from app.core.config import settings
 from app.api.endpoints import api_router
 from app.core.database import check_mongo_connection, init_db_indexes
@@ -38,10 +41,39 @@ app.add_middleware(
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# Production frontend SPA static serving
+FRONTEND_DIST_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+if (FRONTEND_DIST_DIR / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST_DIR / "assets")), name="assets")
+
 @app.get("/")
-def root():
+async def root():
+    index_file = FRONTEND_DIST_DIR / "index.html"
+    if index_file.is_file():
+        return FileResponse(index_file)
     return {
         "message": "Welcome to AstroVed AI Chatbot API",
         "docs": "/docs",
-        "health": f"{settings.API_V1_STR}/health"
+        "health": f"{settings.API_V1_STR}/health",
+        "frontend": "Frontend production build not found at frontend/dist. Run 'cd frontend && npm run build' for production single-service hosting."
+    }
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    if full_path in ("docs", "redoc", "openapi.json"):
+        return None
+    if FRONTEND_DIST_DIR.is_dir():
+        target_file = FRONTEND_DIST_DIR / full_path
+        if target_file.is_file():
+            return FileResponse(target_file)
+        index_file = FRONTEND_DIST_DIR / "index.html"
+        if index_file.is_file():
+            return FileResponse(index_file)
+    return {
+        "message": "AstroVed AI Chatbot Backend",
+        "status": "online",
+        "docs": "/docs",
+        "health": f"{settings.API_V1_STR}/health",
+        "frontend": "Frontend production build not found at frontend/dist. Run 'cd frontend && npm run build' for production single-service hosting."
     }
