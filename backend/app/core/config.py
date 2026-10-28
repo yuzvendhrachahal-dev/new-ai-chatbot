@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     OPENAI_EMBEDDING_MODEL: str = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 
+    # RAG Knowledge Retrieval Configuration (default: false)
+    RAG_ENABLED: bool = os.getenv("RAG_ENABLED", "false").lower() in ("true", "1", "yes")
+
     # MongoDB Configuration
     MONGODB_URI: str = os.getenv("MONGODB_URI") or os.getenv("MONGO_URI") or "mongodb://127.0.0.1:27017/"
     MONGODB_DATABASE: str = os.getenv("MONGODB_DATABASE", os.getenv("MONGODB_DB_NAME", "astroved-chatbot"))

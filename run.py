@@ -14,6 +14,8 @@ import time
 import signal
 import shutil
 import subprocess
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -114,6 +116,38 @@ def run_production(config):
         sys.exit(err.returncode)
 
 
+def wait_for_backend(host: str, port: int, backend_proc: subprocess.Popen, timeout: float = 30.0) -> bool:
+    """Wait until FastAPI health endpoint responds successfully before launching Vite."""
+    connect_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
+    health_url = f"http://{connect_host}:{port}/api/health"
+    start_time = time.time()
+
+    while time.time() - start_time < timeout:
+        code = backend_proc.poll()
+        if code is not None:
+            print(
+                f"[AstroVed Launcher] Backend process exited unexpectedly with code {code}.",
+                file=sys.stderr,
+            )
+            return False
+
+        try:
+            req = urllib.request.Request(health_url, headers={"User-Agent": "AstroVed-Launcher"})
+            with urllib.request.urlopen(req, timeout=1.0) as res:
+                if res.status == 200:
+                    return True
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
+            pass
+
+        time.sleep(0.15)
+
+    print(
+        f"[AstroVed Launcher] Timed out waiting for backend to respond at {health_url}.",
+        file=sys.stderr,
+    )
+    return False
+
+
 def run_development(config):
     host = config["host"]
     backend_port = config["backend_port"]
@@ -182,6 +216,12 @@ def run_development(config):
     except Exception as err:
         print(f"[AstroVed Launcher] Failed to start backend: {err}", file=sys.stderr)
         sys.exit(1)
+
+    print("[AstroVed Launcher] Waiting for backend to be ready...")
+    if not wait_for_backend(host, backend_port, backend_proc):
+        cleanup()
+        sys.exit(1)
+    print(f"[AstroVed Launcher] Backend is ready at http://{host}:{backend_port}")
 
     try:
         frontend_proc = subprocess.Popen(frontend_cmd, cwd=str(FRONTEND_DIR))

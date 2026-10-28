@@ -34,6 +34,8 @@ export interface ConversationDetail {
   is_agent_handling: boolean;
   assigned_agent?: string | null;
   issue_type?: string;
+  rating?: number;
+  feedback?: string;
   messages: MessageItem[];
 }
 

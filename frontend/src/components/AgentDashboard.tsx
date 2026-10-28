@@ -8,17 +8,17 @@ interface AgentDashboardProps {
   onSwitchToCustomer?: () => void;
 }
 
-type TabType = 'all' | 'waiting' | 'with_agent' | 'closed';
+type TabType = 'all' | 'my' | 'waiting' | 'with_agent' | 'closed';
 type RightPanelTab = 'user' | 'activity' | 'quick';
 
 const QUICK_REPLIES = [
-  "Thank you for reaching out! How can I assist you today?",
-  "I'm checking your account details now, please hold on.",
-  "Your request has been noted. Our team will follow up shortly.",
-  "Could you please provide your registered email address?",
-  "I understand your concern. Let me escalate this for you.",
-  "Is there anything else I can help you with today?",
-  "Your issue has been resolved. Have a wonderful day! ✨"
+  "Namaste! Thank you for reaching out to AstroVed. How can I assist you today?",
+  "I am reviewing your birth chart and planetary dasha details now. Please hold on a moment.",
+  "Your request has been noted. Our Vedic astrology team will guide you through the remedies.",
+  "Could you please confirm your date, exact time, and city of birth for accuracy?",
+  "I understand your concern. Let me consult the planetary alignment for your query.",
+  "Are there any specific planetary transits or Sade Sati queries you would like to ask about?",
+  "Your consultation remedies have been noted. May cosmic blessings be upon you! ✨"
 ];
 
 export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
@@ -38,6 +38,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
   const [currentTab, setCurrentTab] = useState<TabType>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('user');
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [replyInput, setReplyInput] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -45,7 +46,9 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
 
   const chatBodyRef = useRef<HTMLDivElement | null>(null);
+  const composerInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Push notifications
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       return Notification.permission;
@@ -68,9 +71,23 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
     }
   }, []);
 
+  const showToast = (msg: string, duration = 3000) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), duration);
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    if (!text) return;
+    navigator.clipboard?.writeText(text).then(() => {
+      showToast(`Copied ${label} to clipboard!`);
+    }).catch(() => {
+      showToast(text);
+    });
+  };
+
   const handleTogglePushNotifications = async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
-      showToast('Push notifications not supported in this browser.');
+      showToast('Push notifications are not supported in this browser.');
       return;
     }
 
@@ -80,7 +97,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
       localStorage.setItem('av_push_enabled', String(next));
       showToast(next ? '🔔 Push notifications enabled!' : '🔕 Push notifications muted.');
     } else if (Notification.permission === 'denied') {
-      showToast('Notifications are blocked by browser. Please enable in site settings.');
+      showToast('Notifications are blocked. Please enable them in browser site settings.');
     } else {
       try {
         const permission = await Notification.requestPermission();
@@ -90,8 +107,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
           localStorage.setItem('av_push_enabled', 'true');
           showToast('🔔 Push notifications allowed successfully!');
           try {
-            new Notification('AstroVed CRM Support', {
-              body: 'Desktop notifications are active. You will be alerted of incoming seeker chats.',
+            new Notification('AstroVed Advisor Support', {
+              body: 'Desktop notifications are active. You will be alerted for incoming customer chats.',
               icon: ASTROVED_LOGO
             });
           } catch {}
@@ -102,11 +119,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
         showToast('Notification request cancelled.');
       }
     }
-  };
-
-  const showToast = (msg: string, duration = 3000) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), duration);
   };
 
   // Fetch all sessions from backend
@@ -129,9 +141,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
               body: `${currentWaiting} chat(s) currently waiting for astrology assistance.`,
               icon: ASTROVED_LOGO
             });
-          } catch {
-            // notification failed
-          }
+          } catch {}
         }
         prevWaitingCountRef.current = currentWaiting;
       }
@@ -160,9 +170,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
     try {
       const data = await chatApi.getAnalytics(agentToken);
       setAnalyticsData(data);
-    } catch {
-      // silent
-    }
+    } catch {}
   };
 
   // Poll sessions periodically when logged in
@@ -257,7 +265,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
         setIsLoggedIn(true);
         showToast(`Welcome back, ${res.display_name}! ✨`);
 
-        // Ask for browser notification permission natively
         if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
           Notification.requestPermission().then(perm => {
             setNotificationPermission(perm);
@@ -287,7 +294,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
   const handleClaim = async () => {
     if (!activeSessionId || !agentToken) return;
     try {
-      // Optimistically disable Claim Chat immediately
       setActiveDetail(prev => prev ? {
         ...prev,
         status: 'active',
@@ -296,12 +302,12 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
       } : prev);
 
       await chatApi.claimChat(activeSessionId, agentName, agentToken);
-      showToast('Chat claimed successfully! 🤝');
+      showToast('Consultation claimed successfully! 🤝');
       await fetchDetail(activeSessionId);
       await fetchSessions();
+      composerInputRef.current?.focus();
     } catch (err: any) {
       showToast(err.message || 'Could not claim chat (already claimed or unavailable)');
-      // Refresh immediately on conflict (HTTP 409)
       await fetchSessions();
       await fetchDetail(activeSessionId);
     }
@@ -318,7 +324,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
       } : prev);
 
       await chatApi.returnToBot(activeSessionId, agentToken);
-      showToast('Returned session to AI guide. Assignment cleared.');
+      showToast('Returned session to AstroVed AI Guide. Advisor assignment cleared.');
       await fetchDetail(activeSessionId);
       await fetchSessions();
     } catch (err: any) {
@@ -327,7 +333,6 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
       await fetchSessions();
     }
   };
-
 
   const handleSendReply = async () => {
     const text = replyInput.trim();
@@ -345,13 +350,21 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
 
   const handleUseQuickReply = (text: string) => {
     setReplyInput(text);
+    composerInputRef.current?.focus();
   };
 
   // Filtered session list
   const filteredSessions = allSessions.filter(s => {
-    if (currentTab === 'waiting' && s.status !== 'waiting') return false;
-    if (currentTab === 'with_agent' && s.status !== 'with_agent' && s.status !== 'active') return false;
-    if (currentTab === 'closed' && s.status !== 'closed' && s.status !== 'resolved') return false;
+    if (currentTab === 'my') {
+      const isAssignedToMe = (s.assigned_agent || '').toLowerCase() === (agentName || '').toLowerCase();
+      if (!isAssignedToMe) return false;
+    } else if (currentTab === 'waiting') {
+      if (s.status !== 'waiting') return false;
+    } else if (currentTab === 'with_agent') {
+      if (s.status !== 'with_agent' && s.status !== 'active') return false;
+    } else if (currentTab === 'closed') {
+      if (s.status !== 'closed' && s.status !== 'resolved') return false;
+    }
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -359,7 +372,8 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
       const matchEmail = (s.customer?.email || '').toLowerCase().includes(q);
       const matchPhone = (s.customer?.mobile || '').toLowerCase().includes(q);
       const matchId = (s.conversation_id || '').toLowerCase().includes(q);
-      return matchName || matchEmail || matchPhone || matchId;
+      const matchTopic = (s.issue_type || '').toLowerCase().includes(q);
+      return matchName || matchEmail || matchPhone || matchId || matchTopic;
     }
     return true;
   });
@@ -368,45 +382,56 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
   const withAgentCount = allSessions.filter(
     s => (s.status === 'with_agent' || s.status === 'active') && s.is_agent_handling
   ).length;
+  const myConversationsCount = allSessions.filter(
+    s => (s.assigned_agent || '').toLowerCase() === (agentName || '').toLowerCase() && s.status !== 'closed'
+  ).length;
 
-  const formatCardDateTime = (isoString?: string): string => {
-    if (!isoString) return '';
+  const formatWaitTime = (dateStr?: string): string => {
+    if (!dateStr) return '';
     try {
-      const d = new Date(isoString);
-      const datePart = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-      const timePart = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-      return `${datePart} • ${timePart}`;
+      const d = new Date(dateStr);
+      const now = new Date();
+      const diffSec = Math.floor((now.getTime() - d.getTime()) / 1000);
+      if (diffSec < 60) return 'Just now';
+      const diffMin = Math.floor(diffSec / 60);
+      if (diffMin < 60) return `${diffMin}m ago`;
+      const diffHour = Math.floor(diffMin / 60);
+      if (diffHour < 24) return `${diffHour}h ago`;
+      const diffDay = Math.floor(diffHour / 24);
+      if (diffDay < 7) return `${diffDay}d ago`;
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    } catch {
+      return '';
+    }
+  };
+
+  const formatTimeHM = (dateStr?: string): string => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
     } catch {
       return '';
     }
   };
 
   return (
-    <div style={{ position: 'relative', width: '100%', minHeight: '100vh', background: 'var(--bg)' }}>
-      {/* Aurora Ambient Glow */}
-      <div className="aurora">
-        <div className="ab"></div>
-        <div className="ab"></div>
-        <div className="ab"></div>
-        <div className="ab"></div>
-      </div>
-      <div className="grd"></div>
-
+    <div className="agent-console-root">
       {/* ── 1. LOGIN SCREEN ── */}
       {!isLoggedIn ? (
-        <div id="ls" style={{ display: 'flex' }}>
-          <div className="lcard">
-            <div className="lorb">
-              <img id="login-logo" src={ASTROVED_LOGO} alt="AstroVed" />
+        <div className="login-screen-wrapper">
+          <div className="login-card">
+            <div className="login-logo-orb">
+              <img src={ASTROVED_LOGO} alt="AstroVed" />
             </div>
-            <div className="ltitle">AstroVed</div>
-            <div className="lsub">CRM SUPPORT CONSOLE</div>
+            <h2 className="login-title">AstroVed</h2>
+            <div className="login-subtitle">Support Console</div>
 
             <form onSubmit={handleLogin}>
-              <div className="lg">
-                <label htmlFor="lu">Username</label>
+              <div className="login-field-group">
+                <label htmlFor="agent-username">Username</label>
                 <input
-                  id="lu"
+                  id="agent-username"
                   type="text"
                   placeholder="agent1"
                   value={username}
@@ -416,11 +441,11 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
                 />
               </div>
 
-              <div className="lg">
-                <label htmlFor="lp">Password</label>
-                <div className="pass-wrap">
+              <div className="login-field-group">
+                <label htmlFor="agent-password">Password</label>
+                <div className="login-pass-wrap">
                   <input
-                    id="lp"
+                    id="agent-password"
                     type={showPassword ? 'text' : 'password'}
                     placeholder="••••••••"
                     value={password}
@@ -430,19 +455,18 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
                   />
                   <button
                     type="button"
-                    className="toggle-pass-btn"
-                    id="togglePassBtn"
+                    className="login-pass-toggle"
                     onClick={() => setShowPassword(!showPassword)}
                     aria-label="Toggle password visibility"
                     title="Toggle password visibility"
                   >
                     {!showPassword ? (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                         <circle cx="12" cy="12" r="3"></circle>
                       </svg>
                     ) : (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
                         <line x1="1" y1="1" x2="23" y2="23"></line>
                       </svg>
@@ -451,334 +475,460 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
                 </div>
               </div>
 
-              <button className="lbtn" type="submit">
-                Enter Console ✦
+              <button className="login-submit-btn" type="submit">
+                Sign In to Console
               </button>
             </form>
 
-            <div className="lerr" id="le" style={{ display: loginError ? 'block' : 'none' }}>
-              {loginError || 'Invalid credentials — please try again'}
-            </div>
+            {loginError && (
+              <div className="login-error-alert">
+                {loginError}
+              </div>
+            )}
           </div>
         </div>
       ) : (
-        /* ── 2. APP CONSOLE ── */
-        <div id="app" className="on" style={{ display: 'flex' }}>
-          {/* Top Navigation */}
-          <nav id="nav">
-            <img className="nlogo" id="nav-logo" src={ASTROVED_LOGO} alt="AstroVed" />
-            <div className="nbrand">
-              AstroVed <em>Support Console</em>
-            </div>
-            <div className="nsep"></div>
-
-            {/* Push Notifications Allow/Block Button */}
-            <button
-              className={`nbtn notif-btn ${
-                notificationPermission === 'granted' && pushEnabled
-                  ? 'active'
-                  : notificationPermission === 'denied'
-                  ? 'blocked'
-                  : 'prompt'
-              }`}
-              onClick={handleTogglePushNotifications}
-              title={
-                notificationPermission === 'granted'
-                  ? pushEnabled
-                    ? 'Push Notifications: Active (Click to mute)'
-                    : 'Push Notifications: Muted (Click to enable)'
-                  : notificationPermission === 'denied'
-                  ? 'Push Notifications: Blocked in browser settings'
-                  : 'Click to allow desktop notifications'
-              }
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z"/>
-              </svg>
-              {notificationPermission === 'granted' && pushEnabled
-                ? 'Push: Active'
-                : notificationPermission === 'granted' && !pushEnabled
-                ? 'Push: Muted'
-                : notificationPermission === 'denied'
-                ? 'Push: Blocked'
-                : 'Allow Push'}
-            </button>
-
-            <div className="npill" id="npill">
-              Support Agent 1
+        /* ── 2. APP CONSOLE (Intercom / Zendesk 3-Panel Layout) ── */
+        <div className="console-app-container">
+          {/* ── LEFT NAVIGATION RAIL ── */}
+          <nav className="nav-rail" aria-label="Support workspace navigation">
+            <div className="nav-rail-brand" title="AstroVed Support Console">
+              <img className="nav-rail-logo" src={ASTROVED_LOGO} alt="AstroVed" />
             </div>
 
-            <button
-              className="nbtn ana"
-              id="anabtn"
-              onClick={() => {
-                setShowAnalytics(!showAnalytics);
-                if (!showAnalytics) fetchAnalytics();
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3 13h2v7H3v-7zm4-6h2v13H7V7zm4 3h2v10h-2V10zm4-7h2v17h-2V3zm4 4h2v13h-2V7z" />
-              </svg>
-              Analytics
-            </button>
+            <div className="nav-rail-items">
+              <button
+                className={`rail-item-btn ${currentTab === 'all' ? 'active' : ''}`}
+                onClick={() => setCurrentTab('all')}
+                title="Inbox (All Conversations)"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
+                  <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
+                </svg>
+              </button>
 
-            <button className="nbtn lo" onClick={handleLogout}>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zm-5 12H5V5h7V3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h7v-2z" />
-              </svg>
-              Log out
-            </button>
+              <button
+                className={`rail-item-btn ${currentTab === 'my' ? 'active' : ''}`}
+                onClick={() => setCurrentTab('my')}
+                title="My Conversations (Assigned to Me)"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+                {myConversationsCount > 0 && (
+                  <span className="rail-badge active">{myConversationsCount}</span>
+                )}
+              </button>
+
+              <button
+                className={`rail-item-btn ${currentTab === 'waiting' ? 'active' : ''}`}
+                onClick={() => setCurrentTab('waiting')}
+                title="Waiting Queue (Need Advisor)"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+                {waitingCount > 0 && (
+                  <span className="rail-badge waiting">{waitingCount}</span>
+                )}
+              </button>
+
+              <button
+                className={`rail-item-btn ${currentTab === 'with_agent' ? 'active' : ''}`}
+                onClick={() => setCurrentTab('with_agent')}
+                title="Active Conversations (With Agent)"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
+                {withAgentCount > 0 && (
+                  <span className="rail-badge active">{withAgentCount}</span>
+                )}
+              </button>
+
+              <button
+                className={`rail-item-btn ${currentTab === 'closed' ? 'active' : ''}`}
+                onClick={() => setCurrentTab('closed')}
+                title="History & Resolved"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+              </button>
+
+              <div className="rail-divider"></div>
+
+              <button
+                className="rail-item-btn"
+                onClick={() => {
+                  setShowAnalytics(!showAnalytics);
+                  if (!showAnalytics) fetchAnalytics();
+                }}
+                title="Command Analytics"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="20" x2="18" y2="10"></line>
+                  <line x1="12" y1="20" x2="12" y2="4"></line>
+                  <line x1="6" y1="20" x2="6" y2="14"></line>
+                </svg>
+              </button>
+
+              <button
+                className={`rail-item-btn ${notificationPermission === 'granted' && pushEnabled ? 'active' : ''}`}
+                onClick={handleTogglePushNotifications}
+                title={
+                  notificationPermission === 'granted'
+                    ? pushEnabled
+                      ? 'Push Alerts: Enabled (Click to mute)'
+                      : 'Push Alerts: Muted (Click to enable)'
+                    : 'Click to allow desktop notifications'
+                }
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
+              </button>
+            </div>
+
+            <div className="nav-rail-bottom">
+              <div
+                className="agent-profile-pill"
+                title={`Active Advisor: ${agentName || 'Agent'} (Online)`}
+              >
+                {(agentName || 'A')[0].toUpperCase()}
+                <span className="agent-online-dot"></span>
+              </div>
+
+              <button
+                className="rail-logout-btn"
+                onClick={handleLogout}
+                title="Sign out of console"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                  <polyline points="16 17 21 12 16 7"></polyline>
+                  <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+              </button>
+            </div>
           </nav>
 
-          <div id="body" className={activeSessionId ? 'chat-active' : ''}>
-            {/* ── SIDEBAR: LIVE QUEUE ── */}
-            <div id="sb">
-              <div className="sb-top">
-                <div className="sb-head">
-                  <h3>⚡ LIVE QUEUE</h3>
-                  <span className="qbadge" id="qbadge">
-                    {waitingCount + withAgentCount}
-                  </span>
-                </div>
-
-                <div className="sb-search">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
-                  </svg>
-                  <input
-                    id="srch"
-                    placeholder="Search users…"
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                  />
-                </div>
-
-                <div className="sb-tabs">
-                  <button
-                    className={`sb-tab ${currentTab === 'all' ? 'on' : ''}`}
-                    onClick={() => setCurrentTab('all')}
-                  >
-                    All
-                  </button>
-                  <button
-                    className={`sb-tab ${currentTab === 'waiting' ? 'on' : ''}`}
-                    onClick={() => setCurrentTab('waiting')}
-                  >
-                    Waiting
-                  </button>
-                  <button
-                    className={`sb-tab ${currentTab === 'with_agent' ? 'on' : ''}`}
-                    onClick={() => setCurrentTab('with_agent')}
-                  >
-                    Active
-                  </button>
-                  <button
-                    className={`sb-tab ${currentTab === 'closed' ? 'on' : ''}`}
-                    onClick={() => setCurrentTab('closed')}
-                  >
-                    History
-                  </button>
-                </div>
+          {/* ── PANEL 1: CONVERSATION LIST (Column 1) ── */}
+          <section className="conv-list-panel" aria-label="Conversation list">
+            <div className="conv-list-header">
+              <div className="conv-list-title-row">
+                <span className="conv-list-title">
+                  {currentTab === 'my'
+                    ? 'My Inbox'
+                    : currentTab === 'waiting'
+                    ? 'Waiting Queue'
+                    : currentTab === 'with_agent'
+                    ? 'Active Chats'
+                    : currentTab === 'closed'
+                    ? 'History'
+                    : 'All Conversations'}
+                </span>
+                <span className="conv-total-pill">{filteredSessions.length}</span>
               </div>
 
-              <div className="sb-stats">
-                <div className="ss-card">
-                  <div className="ss-val" id="ss-w" style={{ color: 'var(--waiting)' }}>
-                    {waitingCount}
-                  </div>
-                  <div className="ss-lbl">Waiting</div>
-                </div>
-                <div className="ss-card">
-                  <div className="ss-val" id="ss-a" style={{ color: 'var(--active)' }}>
-                    {withAgentCount}
-                  </div>
-                  <div className="ss-lbl">With Agent</div>
-                </div>
-              </div>
-
-              {/* Sessions List */}
-              <div id="sl">
-                {filteredSessions.length === 0 ? (
-                  <div className="sb-empty">
-                    <div>⚡</div>
-                    <p>No active chats</p>
-                  </div>
-                ) : (
-                  filteredSessions.map(s => {
-                    const isSelected = s.conversation_id === activeSessionId;
-                    const initial = (s.customer?.name || '?')[0].toUpperCase();
-                    const statusClass =
-                      s.status === 'waiting'
-                        ? 'waiting'
-                        : s.status === 'with_agent' || s.status === 'active'
-                        ? 'with_agent'
-                        : 'closed';
-
-                    return (
-                      <div
-                        key={s.conversation_id}
-                        className={`sc ${isSelected ? 'on' : ''}`}
-                        onClick={() => {
-                          setActiveSessionId(s.conversation_id);
-                          fetchDetail(s.conversation_id);
-                        }}
-                      >
-                        <div className="sc-av">{initial}</div>
-                        <div className="sc-body">
-                          <div className="sc-r1">
-                            <div className="sc-name">{s.customer?.name || 'Anonymous User'}</div>
-                            <span className={`sc-badge ${statusClass}`}>
-                              {s.status === 'with_agent' ? 'ACTIVE' : s.status.toUpperCase()}
-                            </span>
-                          </div>
-                          <div className="sc-sub">
-                            {s.customer?.email || 'user@example.com'} • {formatCardDateTime(s.updated_at)}
-                          </div>
-                          <div className="sc-issue">
-                            Issue: {s.issue_type ? s.issue_type.charAt(0).toUpperCase() + s.issue_type.slice(1) : 'General'}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
+              <div className="conv-search-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input
+                  className="conv-search-input"
+                  placeholder="Search name, phone, issue..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button className="conv-search-clear" onClick={() => setSearchQuery('')}>
+                    ×
+                  </button>
                 )}
+              </div>
+
+              <div className="conv-filter-tabs">
+                <button
+                  className={`conv-filter-tab ${currentTab === 'all' ? 'active' : ''}`}
+                  onClick={() => setCurrentTab('all')}
+                >
+                  All
+                </button>
+                <button
+                  className={`conv-filter-tab ${currentTab === 'waiting' ? 'active' : ''}`}
+                  onClick={() => setCurrentTab('waiting')}
+                >
+                  Waiting
+                </button>
+                <button
+                  className={`conv-filter-tab ${currentTab === 'with_agent' ? 'active' : ''}`}
+                  onClick={() => setCurrentTab('with_agent')}
+                >
+                  Active
+                </button>
+                <button
+                  className={`conv-filter-tab ${currentTab === 'closed' ? 'active' : ''}`}
+                  onClick={() => setCurrentTab('closed')}
+                >
+                  Closed
+                </button>
               </div>
             </div>
 
-            {/* ── CHAT PANEL ── */}
-            <div id="cp">
-              {!activeSessionId || !activeDetail ? (
-                <div id="cp-empty" className="cp-empty" style={{ display: 'flex', flex: 1 }}>
-                  <div className="icon">✦</div>
-                  <p>Select a conversation from the queue</p>
+            {/* Live Queue Stat Strip */}
+            <div className="queue-stats-strip">
+              <div className="q-stat-card">
+                <span className="q-stat-lbl">Waiting</span>
+                <span className="q-stat-val waiting">{waitingCount}</span>
+              </div>
+              <div className="q-stat-card">
+                <span className="q-stat-lbl">With Agent</span>
+                <span className="q-stat-val active">{withAgentCount}</span>
+              </div>
+            </div>
+
+            {/* Conversation Cards Scroll List */}
+            <div className="conv-items-scroll">
+              {filteredSessions.length === 0 ? (
+                <div className="conv-empty-state">
+                  <div className="conv-empty-icon">💬</div>
+                  <div className="conv-empty-text">No conversations found</div>
                 </div>
               ) : (
-                <div id="cp-chat" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, height: '100%', maxHeight: '100%', overflow: 'hidden' }}>
-                  {/* Chat Panel Header */}
-                  <div id="ch">
+                filteredSessions.map(s => {
+                  const isSelected = s.conversation_id === activeSessionId;
+                  const initial = (s.customer?.name || '?')[0].toUpperCase();
+                  const waitTimeStr = formatWaitTime(s.updated_at || s.created_at);
+
+                  return (
+                    <div
+                      key={s.conversation_id}
+                      className={`conv-card ${isSelected ? 'active' : ''}`}
+                      onClick={() => {
+                        setActiveSessionId(s.conversation_id);
+                        fetchDetail(s.conversation_id);
+                      }}
+                    >
+                      <div className="conv-card-avatar">
+                        {initial}
+                        {s.status === 'waiting' && <span className="conv-unread-dot" title="Waiting for advisor" />}
+                      </div>
+
+                      <div className="conv-card-content">
+                        <div className="conv-card-row1">
+                          <span className="conv-card-name">{s.customer?.name || 'Anonymous Customer'}</span>
+                          <span className="conv-card-time">{waitTimeStr}</span>
+                        </div>
+
+                        <div className="conv-card-message">
+                          {s.last_message || s.issue_type || 'AstroVed consultation request'}
+                        </div>
+
+                        <div className="conv-card-row3">
+                          <span className="conv-card-topic">
+                            #{s.issue_type ? s.issue_type.replace(/\s+/g, '') : 'General'}
+                          </span>
+                          <span className={`conv-status-pill ${s.status}`}>
+                            {s.status === 'with_agent' ? 'ACTIVE' : s.status.toUpperCase()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </section>
+
+          {/* ── PANEL 2: MAIN CONVERSATION PANEL (Column 2) ── */}
+          <main className={`conv-main-panel ${activeSessionId ? 'mobile-active' : ''}`} aria-label="Active conversation">
+            {!activeSessionId || !activeDetail ? (
+              <div className="conv-empty-selection">
+                <div className="conv-empty-selection-icon">✦</div>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
+                  Select a Conversation
+                </h3>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 320 }}>
+                  Choose a seeker from the live queue or your assigned chats to view the message history and reply.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Conversation Header */}
+                <header className="conv-main-header">
+                  <div className="header-left-meta">
                     <button
-                      className="hbtn back-btn"
+                      className="mobile-back-btn"
                       onClick={() => {
                         setActiveSessionId(null);
                         setActiveDetail(null);
                       }}
-                      aria-label="Back to session list"
-                      title="Back"
+                      aria-label="Back to conversation list"
+                      title="Back to queue"
                     >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="19" y1="12" x2="5" y2="12"></line>
+                        <polyline points="12 19 5 12 12 5"></polyline>
                       </svg>
                     </button>
 
-                    <div className="ch-av" id="ch-av">
+                    <div className="header-avatar">
                       {(activeDetail.customer?.name || '?')[0].toUpperCase()}
                     </div>
 
-                    <div className="ch-info">
-                      <h3 id="ch-name">{activeDetail.customer?.name || 'Customer'}</h3>
-                      <p id="ch-sub">
-                        {activeDetail.customer?.email || ''} {activeDetail.customer?.mobile ? `• ${activeDetail.customer.mobile}` : ''}
-                      </p>
-                      <div className="ch-tags" id="ch-tags">
-                        <span className={`tag status-${activeDetail.status}`}>
-                          {activeDetail.status === 'with_agent' ? 'active' : activeDetail.status.toLowerCase()}
-                        </span>
-                        <span className="tag">
-                          {activeDetail.issue_type || 'support_request'}
+                    <div className="header-info-col">
+                      <div className="header-customer-name">
+                        {activeDetail.customer?.name || 'Customer'}
+                        <span className={`conv-status-pill ${activeDetail.status}`}>
+                          {activeDetail.status === 'with_agent' ? 'ACTIVE' : activeDetail.status.toUpperCase()}
                         </span>
                       </div>
-                    </div>
-
-                    <div className="ch-actions">
-                      <button
-                        className="hbtn claim"
-                        onClick={handleClaim}
-                        disabled={
-                          activeDetail.status === 'active' ||
-                          activeDetail.status === 'with_agent' ||
-                          activeDetail.status === 'closed' ||
-                          Boolean(activeDetail.assigned_agent)
-                        }
-                      >
-                        {activeDetail.assigned_agent
-                          ? activeDetail.assigned_agent === agentName
-                            ? 'Claimed (You)'
-                            : `Assigned (${activeDetail.assigned_agent})`
-                          : activeDetail.status === 'closed'
-                          ? 'Closed'
-                          : 'Claim Chat'}
-                      </button>
-                      <button
-                        className="hbtn return"
-                        onClick={handleReturnToBot}
-                        disabled={
-                          activeDetail.status === 'closed' ||
-                          activeDetail.status === 'bot_active' ||
-                          !activeDetail.assigned_agent
-                        }
-                        title="End live advisor consultation and return customer to AstroVed AI Guide"
-                      >
-                        End &amp; Return to Bot
-                      </button>
+                      <div className="header-customer-sub">
+                        {activeDetail.customer?.email} {activeDetail.customer?.mobile ? `• ${activeDetail.customer.mobile}` : ''}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Messages History Body (WhatsApp Style) */}
-                  <div id="cb" ref={chatBodyRef}>
-                    {isLoadingDetail && (!activeDetail.messages || activeDetail.messages.length === 0) ? (
-                      <div className="ld">
-                        <div className="sp"></div>Loading messages…
-                      </div>
-                    ) : (
-                      <>
-                        {activeDetail.messages?.map(m => {
-                          const isUser = m.sender === 'user';
-                          const isAgent = m.sender === 'agent';
-                          const isSystem = m.sender === 'system';
-                          const timeStr = formatCardDateTime(m.timestamp);
+                  <div className="header-actions-group">
+                    <button
+                      className="action-btn-claim"
+                      onClick={handleClaim}
+                      disabled={
+                        activeDetail.status === 'active' ||
+                        activeDetail.status === 'with_agent' ||
+                        activeDetail.status === 'closed' ||
+                        Boolean(activeDetail.assigned_agent)
+                      }
+                      title={activeDetail.assigned_agent ? `Assigned to ${activeDetail.assigned_agent}` : 'Claim chat'}
+                    >
+                      {activeDetail.assigned_agent
+                        ? activeDetail.assigned_agent === agentName
+                          ? '✓ Claimed (You)'
+                          : `Assigned (${activeDetail.assigned_agent})`
+                        : activeDetail.status === 'closed'
+                        ? 'Closed'
+                        : 'Claim Chat'}
+                    </button>
 
-                          if (isSystem) {
-                            return (
-                              <div key={m.id} className="msg system">
-                                {m.text}
-                              </div>
-                            );
-                          }
+                    <button
+                      className="action-btn-return"
+                      onClick={handleReturnToBot}
+                      disabled={
+                        activeDetail.status === 'closed' ||
+                        activeDetail.status === 'bot_active' ||
+                        !activeDetail.assigned_agent
+                      }
+                      title="Return customer to AstroVed AI Guide and release advisor claim"
+                    >
+                      End &amp; Return to Bot
+                    </button>
 
+                    <button
+                      className={`action-btn-details-toggle ${isRightPanelOpen ? 'active' : ''}`}
+                      onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
+                      title="Toggle customer details panel"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="15" y1="3" x2="15" y2="21"></line>
+                      </svg>
+                      Details
+                    </button>
+                  </div>
+                </header>
+
+                {/* Message Timeline */}
+                <div className="message-timeline-body" ref={chatBodyRef}>
+                  {isLoadingDetail && (!activeDetail.messages || activeDetail.messages.length === 0) ? (
+                    <div className="system-pill-notice">Loading conversation history…</div>
+                  ) : (
+                    <>
+                      {activeDetail.messages?.map(m => {
+                        const isUser = m.sender === 'user';
+                        const isAgent = m.sender === 'agent';
+                        const isSystem = m.sender === 'system';
+                        const timeStr = formatTimeHM(m.timestamp);
+
+                        if (isSystem) {
                           return (
-                            <div
-                              key={m.id}
-                              className={`msg ${isUser ? 'user' : isAgent ? 'agent' : 'bot'}`}
-                            >
-                              <div className="msg-bubble">
-                                <div className="msg-text">{m.text}</div>
-                                <div className="msg-time">{timeStr}</div>
-                              </div>
+                            <div key={m.id} className="system-pill-notice">
+                              {m.text}
                             </div>
                           );
-                        })}
+                        }
 
-                        {activeDetail.status === 'waiting' && (
-                          <div className="msg system">
-                            Handoff requested: {activeDetail.issue_type || 'support_request'} (priority: normal)
+                        return (
+                          <div
+                            key={m.id}
+                            className={`chat-msg-row ${isUser ? 'user' : isAgent ? 'agent' : 'bot'}`}
+                          >
+                            <div className="chat-msg-bubble">
+                              {m.text}
+                            </div>
+                            <div className="chat-msg-meta">
+                              {!isUser && !isAgent && (
+                                <span className="bot-tag-pill">AI Guide</span>
+                              )}
+                              {isAgent && (
+                                <span style={{ fontWeight: 600 }}>{activeDetail.assigned_agent || 'Advisor'} •</span>
+                              )}
+                              <span>{timeStr}</span>
+                            </div>
                           </div>
-                        )}
-                      </>
-                    )}
+                        );
+                      })}
+
+                      {activeDetail.status === 'waiting' && (
+                        <div className="system-pill-notice">
+                          Customer waiting for advisor • Category: {activeDetail.issue_type || 'General Support'}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* Message Composer (Docked at Bottom) */}
+                <div className="conv-composer-container">
+                  {/* Quick Replies Strip */}
+                  <div className="composer-quick-bar">
+                    <span className="composer-quick-label">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                      </svg>
+                      Quick:
+                    </span>
+                    {QUICK_REPLIES.slice(0, 3).map((qr, idx) => (
+                      <button
+                        key={idx}
+                        className="composer-quick-chip"
+                        onClick={() => handleUseQuickReply(qr)}
+                        type="button"
+                      >
+                        {qr.slice(0, 36)}…
+                      </button>
+                    ))}
                   </div>
 
-                  {/* Reply Input Bar */}
-                  <div id="rb">
+                  {/* Input & Send Button */}
+                  <div className="composer-input-row">
                     <input
-                      id="ri"
+                      ref={composerInputRef}
+                      className="composer-input"
                       placeholder={
                         activeDetail.status === 'closed'
-                          ? 'Session closed — new messages cannot be sent'
+                          ? 'This consultation has ended — session is closed'
                           : activeDetail.status === 'bot_active' || !activeDetail.assigned_agent
-                          ? 'Session returned to AI Guide — claim chat to reply'
+                          ? 'Session handled by AstroVed AI Guide — claim chat to reply'
                           : activeDetail.status === 'waiting'
-                          ? 'Claim chat to begin replying...'
-                          : 'Type your reply...'
+                          ? 'Customer in waiting queue — claim chat to begin replying'
+                          : 'Type your message to the seeker... (Press Enter to send)'
                       }
                       value={replyInput}
                       disabled={
@@ -791,359 +941,366 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
                         if (e.key === 'Enter') handleSendReply();
                       }}
                     />
+
                     <button
-                      id="rs"
+                      className="composer-send-btn"
                       onClick={handleSendReply}
-                      aria-label="Send reply"
                       disabled={
                         activeDetail.status === 'closed' ||
                         activeDetail.status === 'bot_active' ||
                         !activeDetail.assigned_agent ||
                         !replyInput.trim()
                       }
+                      aria-label="Send message"
+                      title="Send message"
                     >
-                      <svg viewBox="0 0 24 24">
-                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                       </svg>
                     </button>
                   </div>
-                </div>
-              )}
-            </div>
 
-            {/* ── RIGHT PANEL ── */}
-            <div id="rp">
-              <div className="rp-tabs">
+                  <div className="composer-hint-row">
+                    <span>
+                      {activeDetail.assigned_agent
+                        ? `Advisor: ${activeDetail.assigned_agent}`
+                        : 'Unassigned Queue'}
+                    </span>
+                    <span>Press Enter to send</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </main>
+
+          {/* ── PANEL 3: RIGHT CUSTOMER DETAILS PANEL (Column 3) ── */}
+          <aside
+            className={`customer-details-panel ${isRightPanelOpen ? 'open' : ''}`}
+            aria-label="Customer profile details"
+          >
+            <div className="details-panel-header">
+              <div className="details-panel-title-row">
+                <span className="details-panel-title">Customer Dossier</span>
                 <button
-                  className={`rp-tab ${rightPanelTab === 'user' ? 'on' : ''}`}
+                  className="details-close-btn"
+                  onClick={() => setIsRightPanelOpen(false)}
+                  title="Close details"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="details-tabs-row">
+                <button
+                  className={`details-tab-btn ${rightPanelTab === 'user' ? 'active' : ''}`}
                   onClick={() => setRightPanelTab('user')}
                 >
-                  User
+                  Profile
                 </button>
                 <button
-                  className={`rp-tab ${rightPanelTab === 'activity' ? 'on' : ''}`}
+                  className={`details-tab-btn ${rightPanelTab === 'activity' ? 'active' : ''}`}
                   onClick={() => setRightPanelTab('activity')}
                 >
                   Activity
                 </button>
                 <button
-                  className={`rp-tab ${rightPanelTab === 'quick' ? 'on' : ''}`}
+                  className={`details-tab-btn ${rightPanelTab === 'quick' ? 'active' : ''}`}
                   onClick={() => setRightPanelTab('quick')}
                 >
-                  Quick
+                  Quick Replies
                 </button>
-              </div>
-
-              {/* User Tab */}
-              <div className="rp-body" id="rp-user" style={{ display: rightPanelTab === 'user' ? 'block' : 'none' }}>
-                {!activeDetail ? (
-                  <div className="ucard">
-                    <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--muted)', fontSize: 12 }}>
-                      <div style={{ fontSize: 34, opacity: 0.14, color: 'var(--purple)', marginBottom: 10 }}>◈</div>
-                      Select a chat to see user details
-                    </div>
-                  </div>
-                ) : (
-                  <div className="ucard">
-                    <div className="user-hero">
-                      <div className="user-av-large">{(activeDetail.customer?.name || '?')[0].toUpperCase()}</div>
-                      <h4>{activeDetail.customer?.name || 'Seeker'}</h4>
-                      <p>{activeDetail.customer?.email || 'No email provided'}</p>
-                    </div>
-
-                    <div className="user-details-list">
-                      <div className="ud-row">
-                        <span className="ud-label">PHONE</span>
-                        <span className="ud-val">{activeDetail.customer?.mobile || '—'}</span>
-                      </div>
-                      <div className="ud-row">
-                        <span className="ud-label">STATUS</span>
-                        <span className={`ud-val status-${activeDetail.status}`}>
-                          {activeDetail.status === 'with_agent' ? 'ACTIVE' : activeDetail.status.toUpperCase()}
-                        </span>
-                      </div>
-                      <div className="ud-row">
-                        <span className="ud-label">ISSUE TYPE</span>
-                        <span className="ud-val">{activeDetail.issue_type || 'support_request'}</span>
-                      </div>
-                      <div className="ud-row">
-                        <span className="ud-label">PRIORITY</span>
-                        <span className="ud-val">normal</span>
-                      </div>
-                      <div className="ud-row">
-                        <span className="ud-label">ASSIGNED AGENT</span>
-                        <span className="ud-val">{activeDetail.assigned_agent || 'Unassigned'}</span>
-                      </div>
-                      <div className="ud-row">
-                        <span className="ud-label">SESSION ID</span>
-                        <span className="ud-val code">{activeDetail.conversation_id}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Activity Tab */}
-              <div className="rp-body" id="rp-activity" style={{ display: rightPanelTab === 'activity' ? 'block' : 'none' }}>
-                {!activeDetail ? (
-                  <div className="a-empty">Select a chat to see activity</div>
-                ) : (
-                  <div className="activity-timeline">
-                    <div className="act-item">
-                      <div className="act-dot"></div>
-                      <div className="act-content">
-                        <div className="act-title">Session Created</div>
-                        <div className="act-time">
-                          {new Date(activeDetail.created_at).toLocaleTimeString()}
-                        </div>
-                      </div>
-                    </div>
-                    {activeDetail.is_agent_handling && (
-                      <div className="act-item">
-                        <div className="act-dot agent"></div>
-                        <div className="act-content">
-                          <div className="act-title">Claimed by {activeDetail.assigned_agent || 'Advisor'}</div>
-                          <div className="act-time">Live Support Mode</div>
-                        </div>
-                      </div>
-                    )}
-                    <div className="act-item">
-                      <div className="act-dot message"></div>
-                      <div className="act-content">
-                        <div className="act-title">{activeDetail.messages?.length || 0} Total Messages Exchanged</div>
-                        <div className="act-time">Active Conversation</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Quick Replies Tab */}
-              <div className="rp-body" id="rp-quick" style={{ display: rightPanelTab === 'quick' ? 'block' : 'none' }}>
-                <div className="qr-section">
-                  <div className="qr-label">Quick Replies</div>
-                  <div className="qr-chips">
-                    {QUICK_REPLIES.map((qr, idx) => (
-                      <button
-                        key={idx}
-                        className="qr-chip"
-                        onClick={() => handleUseQuickReply(qr)}
-                      >
-                        {qr}
-                      </button>
-                    ))}
-                  </div>
-                </div>
               </div>
             </div>
 
-            {/* ── ANALYTICS OVERLAY ── */}
-            <div id="ap" style={{ display: showAnalytics ? 'flex' : 'none' }}>
-              <div className="aw">
-                <div className="ana-hdr">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                    <button
-                      className="hbtn back-btn"
-                      onClick={() => setShowAnalytics(false)}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: 6,
-                        background: 'rgba(255,255,255,0.05)',
-                        border: '1px solid var(--border)',
-                        color: 'var(--text)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
-                      </svg>
-                      Back
-                    </button>
-                    <div>
-                      <div className="at">✦ Command Analytics</div>
-                      <div className="at-sub" id="ats">
-                        Live stream data from AstroVed support engine
+            <div className="details-panel-content">
+              {!activeDetail ? (
+                <div style={{ textAlign: 'center', padding: '40px 10px', color: 'var(--text-muted)', fontSize: 13 }}>
+                  Select a conversation to see the customer profile and rating.
+                </div>
+              ) : rightPanelTab === 'user' ? (
+                /* Profile Tab */
+                <div>
+                  <div className="profile-card-hero">
+                    <div className="profile-avatar-large">
+                      {(activeDetail.customer?.name || '?')[0].toUpperCase()}
+                    </div>
+                    <div className="profile-name-lg">{activeDetail.customer?.name || 'Seeker'}</div>
+                    <div className="profile-email-sub">{activeDetail.customer?.email || 'No email provided'}</div>
+                  </div>
+
+                  {/* Customer Rating Section */}
+                  <div className="details-section-card">
+                    <div className="details-section-title">Customer Satisfaction</div>
+                    {activeDetail.rating ? (
+                      <div className="rating-display-box">
+                        <div className="rating-stars-row">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <span
+                              key={i}
+                              style={{ color: i < activeDetail.rating! ? 'var(--gold-600)' : 'var(--bg-muted)' }}
+                            >
+                              ★
+                            </span>
+                          ))}
+                          <span className="rating-score-pill">{activeDetail.rating} / 5</span>
+                        </div>
+                        {activeDetail.feedback && (
+                          <div className="rating-feedback-quote">
+                            "{activeDetail.feedback}"
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="rating-empty-notice">
+                        No customer review submitted for this session yet.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Metadata List */}
+                  <div className="details-section-card">
+                    <div className="details-section-title">Contact &amp; Session Info</div>
+                    <div className="meta-kv-list">
+                      <div className="meta-kv-row">
+                        <span className="meta-kv-key">Phone</span>
+                        <span className="meta-kv-val">
+                          {activeDetail.customer?.mobile || '—'}
+                          {activeDetail.customer?.mobile && (
+                            <button
+                              className="copy-icon-btn"
+                              onClick={() => copyToClipboard(activeDetail.customer.mobile, 'Phone number')}
+                              title="Copy phone"
+                            >
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                              </svg>
+                            </button>
+                          )}
+                        </span>
+                      </div>
+
+                      <div className="meta-kv-row">
+                        <span className="meta-kv-key">Status</span>
+                        <span className={`conv-status-pill ${activeDetail.status}`}>
+                          {activeDetail.status.toUpperCase()}
+                        </span>
+                      </div>
+
+                      <div className="meta-kv-row">
+                        <span className="meta-kv-key">Issue Category</span>
+                        <span className="meta-kv-val">{activeDetail.issue_type || 'General Astrology'}</span>
+                      </div>
+
+                      <div className="meta-kv-row">
+                        <span className="meta-kv-key">Priority</span>
+                        <span className="meta-kv-val" style={{ color: 'var(--text-secondary)' }}>Normal</span>
+                      </div>
+
+                      <div className="meta-kv-row">
+                        <span className="meta-kv-key">Assigned Agent</span>
+                        <span className="meta-kv-val">{activeDetail.assigned_agent || 'Unassigned'}</span>
+                      </div>
+
+                      <div className="meta-kv-row">
+                        <span className="meta-kv-key">Session ID</span>
+                        <span className="meta-kv-val code">
+                          {activeDetail.conversation_id}
+                          <button
+                            className="copy-icon-btn"
+                            onClick={() => copyToClipboard(activeDetail.conversation_id, 'Session ID')}
+                            title="Copy ID"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                          </button>
+                        </span>
+                      </div>
+
+                      <div className="meta-kv-row">
+                        <span className="meta-kv-key">Created</span>
+                        <span className="meta-kv-val" style={{ fontSize: 11 }}>
+                          {new Date(activeDetail.created_at).toLocaleString('en-GB')}
+                        </span>
                       </div>
                     </div>
                   </div>
+                </div>
+              ) : rightPanelTab === 'activity' ? (
+                /* Activity Tab */
+                <div className="activity-timeline-list">
+                  <div className="activity-step-item">
+                    <div className="activity-step-dot"></div>
+                    <div className="activity-step-title">Session Created</div>
+                    <div className="activity-step-time">{new Date(activeDetail.created_at).toLocaleTimeString()}</div>
+                  </div>
 
-                  <div className="hdr-actions">
-                    <div className="live-pill">
-                      <div className="ldot"></div>LIVE
+                  {activeDetail.is_agent_handling && (
+                    <div className="activity-step-item">
+                      <div className="activity-step-dot agent"></div>
+                      <div className="activity-step-title">Claimed by {activeDetail.assigned_agent || 'Advisor'}</div>
+                      <div className="activity-step-time">Live Support Takeover</div>
                     </div>
-                    <button className="icon-btn" onClick={fetchAnalytics}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
-                      </svg>
-                      Refresh
+                  )}
+
+                  <div className="activity-step-item">
+                    <div className="activity-step-dot waiting"></div>
+                    <div className="activity-step-title">{activeDetail.messages?.length || 0} Messages Recorded</div>
+                    <div className="activity-step-time">Active Conversation</div>
+                  </div>
+                </div>
+              ) : (
+                /* Quick Replies Library Tab */
+                <div className="qr-library-list">
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4 }}>
+                    Click to insert into reply composer:
+                  </div>
+                  {QUICK_REPLIES.map((qr, idx) => (
+                    <button
+                      key={idx}
+                      className="qr-card-item"
+                      onClick={() => handleUseQuickReply(qr)}
+                    >
+                      {qr}
                     </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </aside>
+
+          {/* ── ANALYTICS OVERLAY (Light Theme) ── */}
+          {showAnalytics && (
+            <div className="analytics-modal-backdrop" onClick={() => setShowAnalytics(false)}>
+              <div className="analytics-modal-card" onClick={e => e.stopPropagation()}>
+                <div className="analytics-header">
+                  <div className="analytics-title-group">
+                    <button
+                      className="analytics-modal-close-btn"
+                      onClick={() => setShowAnalytics(false)}
+                    >
+                      ← Close
+                    </button>
+                    <span className="analytics-title">Command Analytics</span>
                   </div>
+
+                  <button
+                    className="action-btn-return"
+                    onClick={fetchAnalytics}
+                    style={{ fontSize: 12, height: 32 }}
+                  >
+                    Refresh Data
+                  </button>
                 </div>
 
-                {/* KPI Cards */}
-                <div className="sg">
-                  <div className="scard c1">
-                    <div className="cb"></div>
-                    <div className="shimmer"></div>
-                    <div className="ico">💬</div>
-                    <div className="sv" id="st">
-                      {analyticsData ? analyticsData.total_sessions : allSessions.length}
+                <div className="analytics-body-scroll">
+                  {/* KPI Cards */}
+                  <div className="analytics-kpi-grid">
+                    <div className="kpi-stat-card">
+                      <span className="kpi-stat-val">
+                        {analyticsData ? analyticsData.total_sessions : allSessions.length}
+                      </span>
+                      <span className="kpi-stat-lbl">Total Sessions</span>
                     </div>
-                    <div className="sl2">Total Sessions</div>
-                  </div>
-                  <div className="scard c2">
-                    <div className="cb"></div>
-                    <div className="shimmer"></div>
-                    <div className="ico">✅</div>
-                    <div className="sv" id="sc2">
-                      {analyticsData ? analyticsData.resolved : allSessions.filter(s => s.status === 'closed' || s.status === 'resolved').length}
-                    </div>
-                    <div className="sl2">Resolved</div>
-                  </div>
-                  <div className="scard c3">
-                    <div className="cb"></div>
-                    <div className="shimmer"></div>
-                    <div className="ico">⏳</div>
-                    <div className="sv" id="sw">
-                      {analyticsData ? analyticsData.waiting : waitingCount}
-                    </div>
-                    <div className="sl2">Waiting</div>
-                  </div>
-                  <div className="scard c4">
-                    <div className="cb"></div>
-                    <div className="shimmer"></div>
-                    <div className="ico">🤝</div>
-                    <div className="sv" id="sa">
-                      {analyticsData ? analyticsData.with_agent : withAgentCount}
-                    </div>
-                    <div className="sl2">With Agent</div>
-                  </div>
-                </div>
 
-                {/* Charts */}
-                <div className="cg">
-                  <div className="cc">
-                    <h4>Top Issue Types</h4>
-                    <div id="ibars">
+                    <div className="kpi-stat-card">
+                      <span className="kpi-stat-val" style={{ color: 'var(--status-active-dot)' }}>
+                        {analyticsData ? analyticsData.resolved : allSessions.filter(s => s.status === 'closed' || s.status === 'resolved').length}
+                      </span>
+                      <span className="kpi-stat-lbl">Resolved</span>
+                    </div>
+
+                    <div className="kpi-stat-card">
+                      <span className="kpi-stat-val" style={{ color: 'var(--gold-600)' }}>
+                        {analyticsData ? analyticsData.waiting : waitingCount}
+                      </span>
+                      <span className="kpi-stat-lbl">Waiting Queue</span>
+                    </div>
+
+                    <div className="kpi-stat-card">
+                      <span className="kpi-stat-val" style={{ color: 'var(--indigo-700)' }}>
+                        {analyticsData ? analyticsData.with_agent : withAgentCount}
+                      </span>
+                      <span className="kpi-stat-lbl">With Advisor</span>
+                    </div>
+                  </div>
+
+                  {/* Charts Grid */}
+                  <div className="analytics-charts-grid">
+                    <div className="chart-card">
+                      <h4>Top Issue Topics</h4>
                       {analyticsData?.top_issues && analyticsData.top_issues.length > 0 ? (
                         analyticsData.top_issues.map((item, i) => (
-                          <div key={i} className="issue-bar-row" style={{ marginBottom: 12 }}>
+                          <div key={i} style={{ marginBottom: 10 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
                               <span>{item.name}</span>
-                              <span style={{ color: 'var(--muted)' }}>{item.count} ({item.pct}%)</span>
+                              <span style={{ color: 'var(--text-muted)' }}>{item.count} ({item.pct}%)</span>
                             </div>
-                            <div style={{ height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
-                              <div style={{ height: '100%', width: `${item.pct}%`, background: 'var(--purple)', borderRadius: 3 }}></div>
+                            <div className="issue-bar-track">
+                              <div className="issue-bar-fill" style={{ width: `${item.pct}%` }}></div>
                             </div>
                           </div>
                         ))
                       ) : (
-                        <div style={{ color: 'var(--muted)', fontSize: 12, padding: '16px 0', textAlign: 'center' }}>
-                          No consultation issue topics recorded yet.
+                        <div style={{ color: 'var(--text-muted)', fontSize: 12, padding: '20px 0', textAlign: 'center' }}>
+                          No consultation issues recorded yet.
                         </div>
                       )}
                     </div>
-                  </div>
 
-                  <div className="cc">
-                    <h4>Status Mix</h4>
-                    <div className="dw">
-                      <svg className="ds" viewBox="0 0 42 42" id="donut">
-                        <circle cx="21" cy="21" r="15.9" fill="transparent" stroke="rgba(0,245,255,.05)" strokeWidth="6" />
-                        <circle
-                          cx="21"
-                          cy="21"
-                          r="15.9"
-                          fill="transparent"
-                          stroke="#22C55E"
-                          strokeWidth="6"
-                          strokeDasharray="40 60"
-                          strokeDashoffset="25"
-                        />
-                        <circle
-                          cx="21"
-                          cy="21"
-                          r="15.9"
-                          fill="transparent"
-                          stroke="#F2B84B"
-                          strokeWidth="6"
-                          strokeDasharray="30 70"
-                          strokeDashoffset="85"
-                        />
-                        <circle
-                          cx="21"
-                          cy="21"
-                          r="15.9"
-                          fill="transparent"
-                          stroke="#34D399"
-                          strokeWidth="6"
-                          strokeDasharray="30 70"
-                          strokeDashoffset="55"
-                        />
-                      </svg>
-                      <div className="dl" id="dleg">
-                        {analyticsData?.status_mix ? (
-                          analyticsData.status_mix.map((item, idx) => (
-                            <div key={idx} className="leg-item">
-                              <span className="dot" style={{ background: item.color }}></span>
-                              {item.status} ({item.count})
-                            </div>
-                          ))
-                        ) : (
-                          <>
-                            <div className="leg-item"><span className="dot" style={{ background: '#F2B84B' }}></span>Waiting ({waitingCount})</div>
-                            <div className="leg-item"><span className="dot" style={{ background: '#22C55E' }}></span>With Agent ({withAgentCount})</div>
-                            <div className="leg-item"><span className="dot" style={{ background: '#34D399' }}></span>Resolved</div>
-                          </>
-                        )}
+                    <div className="chart-card">
+                      <h4>Queue Performance</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-light)' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>Avg Response Time</span>
+                          <strong>{analyticsData?.avg_response_time_seconds ? `${analyticsData.avg_response_time_seconds}s` : 'Real-time telemetry active'}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-light)' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>Bot Handling Ratio</span>
+                          <strong>{analyticsData?.bot_handled ? `${analyticsData.bot_handled} sessions` : 'Active'}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>Live Queue Status</span>
+                          <span style={{ color: 'var(--status-active-dot)', fontWeight: 600 }}>Optimal</span>
+                        </div>
                       </div>
                     </div>
-                    {analyticsData?.avg_response_time_seconds !== undefined && (
-                      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 14, textAlign: 'center' }}>
-                        Avg Advisor Response Time: <strong style={{ color: 'var(--text)' }}>{analyticsData.avg_response_time_seconds > 0 ? `${analyticsData.avg_response_time_seconds}s` : 'Real-time telemetry active'}</strong>
-                      </div>
-                    )}
                   </div>
-                </div>
 
-                {/* Recent Users Table */}
-                <div className="utc">
-                  <h4>Recent Users</h4>
-                  <div className="tbl-w">
-                    <table>
+                  {/* Recent Users Table */}
+                  <div className="recent-users-table-card">
+                    <h4>Recent Consultations</h4>
+                    <table className="light-table">
                       <thead>
                         <tr>
-                          <th>Name</th>
+                          <th>Customer</th>
                           <th>Email</th>
                           <th>Phone</th>
                           <th>Status</th>
-                          <th>Issue</th>
-                          <th>Date</th>
+                          <th>Topic</th>
                         </tr>
                       </thead>
-                      <tbody id="utb">
-                        {(analyticsData?.recent_users || allSessions.slice(0, 8).map(s => ({
+                      <tbody>
+                        {(analyticsData?.recent_users || allSessions.slice(0, 6).map(s => ({
                           name: s.customer?.name || 'Seeker',
                           email: s.customer?.email || '—',
                           phone: s.customer?.mobile || '—',
                           status: s.status,
-                          issue: s.issue_type || 'Astrology',
-                          date: new Date(s.created_at).toLocaleDateString()
+                          issue: s.issue_type || 'Astrology'
                         }))).map((u, idx) => (
                           <tr key={idx}>
                             <td><strong>{u.name}</strong></td>
                             <td>{u.email}</td>
                             <td>{u.phone}</td>
                             <td>
-                              <span className={`sc-badge ${u.status.toLowerCase()}`}>
+                              <span className={`conv-status-pill ${u.status.toLowerCase()}`}>
                                 {u.status}
                               </span>
                             </td>
                             <td>{u.issue}</td>
-                            <td>{u.date}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1152,13 +1309,13 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
                 </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
-      {/* Toast Notification */}
+      {/* Light Toast Notification */}
       {toastMessage && (
-        <div id="toast" className="on">
+        <div className="light-toast">
           {toastMessage}
         </div>
       )}

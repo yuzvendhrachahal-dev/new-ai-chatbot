@@ -102,8 +102,10 @@ class KnowledgeService:
 
     def _ensure_fixtures_seeded(self):
         """
-        Seeds approved reference documents if collection is empty.
+        Seeds approved reference documents if collection is empty and RAG is enabled.
         """
+        if not getattr(settings, "RAG_ENABLED", False):
+            return
         try:
             col = get_knowledge_collection()
             if col.count_documents({}) == 0:
@@ -145,10 +147,13 @@ class KnowledgeService:
 
     def retrieve(self, query: str, top_k: int = 2) -> List[Dict[str, Any]]:
         """
-        Retrieves relevant approved knowledge documents for a query.
+        Retrieves relevant approved knowledge documents for a query when RAG is enabled.
         Uses MongoDB text search and tag/keyword matching.
-        Returns empty list if no approved documents match, allowing honest fallbacks.
+        Returns empty list if RAG is disabled or if no approved documents match.
         """
+        if not getattr(settings, "RAG_ENABLED", False):
+            return []
+
         if not query or not query.strip():
             return []
 

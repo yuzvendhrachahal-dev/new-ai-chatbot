@@ -29,24 +29,6 @@ export const App: React.FC = () => {
 
   return (
     <div className="astroved-root-app">
-      {/* Discreet floating mode switcher for testing/evaluating both screens */}
-      <div className="view-mode-floating-bar">
-        <button
-          className={`mode-btn ${currentView === 'customer' ? 'active' : ''}`}
-          onClick={() => switchView('customer')}
-          title="Customer Chatbot View (/app)"
-        >
-          <span>Chatbot (/app)</span>
-        </button>
-        <button
-          className={`mode-btn ${currentView === 'agent' ? 'active' : ''}`}
-          onClick={() => switchView('agent')}
-          title="Agent Console View (/agent/dashboard)"
-        >
-          <span>Agent Console (/agent)</span>
-        </button>
-      </div>
-
       {currentView === 'customer' ? (
         <CustomerChatbot onSwitchToAgent={() => switchView('agent')} />
       ) : (

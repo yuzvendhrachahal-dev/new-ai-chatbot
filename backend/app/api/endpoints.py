@@ -189,20 +189,7 @@ async def send_chat_message(payload: SendMessageRequest):
             is_mock=False
         )
 
-    # 5. Check for greeting / gratitude / small talk before RAG retrieval
-    greeting_reply = detect_greeting_intent(payload.message)
-    if greeting_reply:
-        reply_msg = store.add_message(payload.conversation_id, sender="assistant", text=greeting_reply)
-        await event_broker.publish_message(payload.conversation_id, reply_msg.model_dump())
-        return SendMessageResponse(
-            conversation_id=payload.conversation_id,
-            user_message=user_msg,
-            reply=reply_msg,
-            is_mock=True,
-            sources=[]
-        )
-
-    # 6. Format message history for RAG / LLM knowledge retrieval
+    # 5. Format message history for conversational LLM engine
     history = []
     for m in conv["messages"][:-1]:
         role = "assistant" if m.sender in ["assistant", "agent"] else "user"

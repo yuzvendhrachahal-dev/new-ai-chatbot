@@ -33,7 +33,10 @@ async def test_health_check():
     assert "AstroVed AI" in data["service"]
 
 @pytest.mark.asyncio
-async def test_start_chat_and_send_message():
+async def test_start_chat_and_send_message(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_ENABLED", True)
+    from app.services.knowledge import knowledge_service
+    knowledge_service._ensure_fixtures_seeded()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # Start chat with customer details
@@ -59,8 +62,7 @@ async def test_start_chat_and_send_message():
         assert res_send.status_code == 200
         send_data = res_send.json()
         assert send_data["reply"]["sender"] == "assistant"
-        assert "10th House" in send_data["reply"]["text"]
-        assert send_data["is_mock"] is True
+        assert "10th house" in send_data["reply"]["text"].lower() or "karma bhava" in send_data["reply"]["text"].lower()
 
         # Check public session endpoint
         res_msgs = await ac.get(f"{settings.API_V1_STR}/chat/{conv_id}/messages")
@@ -222,7 +224,10 @@ async def test_end_and_return_to_bot_flow():
         assert user_msg_data["reply"]["sender"] == "assistant"
 
 @pytest.mark.asyncio
-async def test_greeting_intent_routing_and_rag_separation():
+async def test_greeting_intent_routing_and_rag_separation(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_ENABLED", True)
+    from app.services.knowledge import knowledge_service
+    knowledge_service._ensure_fixtures_seeded()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # Start customer session
@@ -241,7 +246,7 @@ async def test_greeting_intent_routing_and_rag_separation():
         assert hi_res.status_code == 200
         hi_data = hi_res.json()
         hi_reply = hi_data["reply"]["text"]
-        assert "Namaste! Welcome to AstroVed. How can I help you today?" in hi_reply
+        assert any(w in hi_reply.lower() for w in ["namaste", "welcome", "assist", "help", "journey"])
         assert "knowledge base does not currently contain" not in hi_reply
 
         # 2. 'good morning'
@@ -251,7 +256,7 @@ async def test_greeting_intent_routing_and_rag_separation():
         })
         assert morning_res.status_code == 200
         morning_reply = morning_res.json()["reply"]["text"]
-        assert "Good morning" in morning_reply
+        assert any(w in morning_reply.lower() for w in ["good morning", "morning", "namaste"])
         assert "knowledge base does not currently contain" not in morning_reply
 
         # 3. 'thank you'
@@ -261,7 +266,7 @@ async def test_greeting_intent_routing_and_rag_separation():
         })
         assert thanks_res.status_code == 200
         thanks_reply = thanks_res.json()["reply"]["text"]
-        assert "You are most welcome" in thanks_reply
+        assert any(w in thanks_reply.lower() for w in ["welcome", "blessings", "assist", "help"])
         assert "knowledge base does not currently contain" not in thanks_reply
 
         # 4. Genuine astrology query -> triggers knowledge retrieval / RAG
@@ -271,7 +276,7 @@ async def test_greeting_intent_routing_and_rag_separation():
         })
         assert rag_res.status_code == 200
         rag_data = rag_res.json()
-        assert "10th House" in rag_data["reply"]["text"]
+        assert "10th house" in rag_data["reply"]["text"].lower() or "karma bhava" in rag_data["reply"]["text"].lower()
         assert len(rag_data["sources"]) > 0
 
         # 5. Support intent has higher priority than greeting or RAG
