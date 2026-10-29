@@ -5,7 +5,8 @@ from typing import List, Dict, Tuple, Optional
 from app.core.config import settings
 from app.services.knowledge import knowledge_service
 from app.services.astroved_faq import astroved_faq_service
-from app.services.intent import detect_greeting_intent
+from app.services.intent import detect_greeting_intent, detect_quick_action_intent
+from app.services.catalog import catalog_service, is_product_query
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,9 @@ ROLE & COMMUNICATION STYLE:
 - When no specific reference material matches, answer general astrology questions using your broad Vedic astrology knowledge, while clearly distinguishing traditional spiritual beliefs from established astronomical or empirical facts.
 - Offer spiritual encouragement and suggest personalized birth chart analysis with AstroVed astrologers when complex personal life timing is discussed.
 - Use clean, well-formatted markdown for readability.
+
+CONVERSATION CONTINUITY & ANTI-REPETITION:
+- You are in an ongoing consultation. DO NOT say "Welcome to AstroVed" or repeat introductory welcome greetings on subsequent turns. Answer the seeker's question directly, warmly, and concisely.
 
 OFFICIAL ASTROVED INFORMATION & BOUNDARIES:
 - Only reference specific AstroVed products, services, prices, or policies if they are explicitly provided in the verified reference materials accompanying your prompt.
@@ -95,6 +99,7 @@ def sanitize_response(text: str) -> str:
         settings.JWT_SECRET,
         settings.OPENAI_API_KEY,
         settings.INTERNAL_AGENT_KEY,
+        getattr(settings, "ASTROVED_JWT_TOKEN", ""),
     ]
     sanitized = text
     for secret in scrub_targets:
@@ -110,8 +115,9 @@ class LLMService:
         Enforces:
         1. Prompt injection & credential protection.
         2. Natural conversational handling for greetings/thanks without knowledge lookup.
-        3. Optional RAG context when RAG_ENABLED is True.
-        4. Temporary unavailable response if OpenAI is unreachable (no fake AI answers).
+        3. AstroVed product/service catalog search with LLM-generated description, valid INR price, and URL.
+        4. Optional RAG context when RAG_ENABLED is True.
+        5. Temporary unavailable response if OpenAI is unreachable (no fake AI answers).
         Returns: (response_text, is_mock, sources)
         """
         # 1. Security Check: Block prompt injection / secret exfiltration attempts
@@ -119,10 +125,31 @@ class LLMService:
             return SECURITY_REFUSAL_MESSAGE, True, []
 
         # 2. Intent Check: Check if message is a greeting / gratitude / casual small talk
-        greeting = detect_greeting_intent(user_message)
+        # Greetings and ordinary conversational messages must not trigger product searches
+        has_history = bool(history and len(history) > 0)
+        greeting = detect_greeting_intent(user_message, has_history=has_history)
         is_greeting = greeting is not None
 
-        # 3. Reference Retrieval:
+        # 3. Quick-action intent check (Horoscope, Birth Chart, Compatibility, Remedies)
+        quick_action_reply = detect_quick_action_intent(user_message)
+        if quick_action_reply:
+            return quick_action_reply, True, []
+
+        api_key = settings.OPENAI_API_KEY.strip()
+
+        # 4. Product / Service Query Check:
+        # Queries with product intent must trigger catalog search BEFORE general LLM response
+        if not is_greeting and is_product_query(user_message):
+            matched_products = catalog_service.search(user_message, top_k=3)
+            resp_text, is_mock, sources = await catalog_service.generate_customer_description(
+                query=user_message,
+                products=matched_products,
+                api_key=api_key,
+                model=settings.OPENAI_MODEL
+            )
+            return sanitize_response(resp_text), is_mock, sources
+
+        # 4. Reference Retrieval (General Astrology & Knowledge):
         # Greetings, thanks, and small talk bypass reference lookup entirely.
         # When RAG_ENABLED is True, query future RAG knowledge service.
         # When RAG_ENABLED is False (default), query the starter AstroVed FAQ reference module.
@@ -142,8 +169,6 @@ class LLMService:
                     "source": doc.get("source"),
                     "document_id": doc.get("id") or doc.get("document_id")
                 })
-
-        api_key = settings.OPENAI_API_KEY.strip()
 
         # 4. If OpenAI API key is NOT configured (e.g. offline / development mode)
         if not api_key:

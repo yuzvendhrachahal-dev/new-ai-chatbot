@@ -40,6 +40,11 @@ from app.core.database import (
     get_sessions_collection
 )
 from app.core.config import settings
+from app.services.astroved_customer import (
+    astroved_customer_service,
+    CustomerDetailsRequest,
+    split_phone_number
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,12 +106,52 @@ async def start_chat(payload: StartChatRequest):
         action="created"
     )
 
+    # Explicit customer details submission flow integration with AstroVed QA API
+    # Safe non-blocking execution; does not disrupt chat consultation if external API is slow or unavailable
+    try:
+        c_code, mob = split_phone_number(payload.mobile)
+        await astroved_customer_service.submit_customer_details(
+            customer_name=payload.name.strip(),
+            currency_code="INR",
+            country_code=c_code,
+            mobile_no=mob,
+            email_address=payload.email.strip()
+        )
+    except Exception as err:
+        logger.warning("[AstroVed Lead] Non-fatal submission error: %s", type(err).__name__)
+
     return StartChatResponse(
         conversation_id=conv_id,
         welcome_message=welcome_msg,
         welcome_message_id=welcome_item.id,
         customer=customer
     )
+
+
+@api_router.post("/customer/chatbot-details")
+async def submit_chatbot_details_endpoint(payload: CustomerDetailsRequest):
+    """
+    Explicit server-side endpoint for AstroVed AddChatBotDetails integration.
+    Submits validated CustomerName, CurrencyCode, CountryCode, MobileNo, and EmailAddress
+    to https://qawebservice.astroved.com/api/UserAccount/AddChatBotDetails.
+    Never exposes internal tokens or secrets.
+    """
+    result = await astroved_customer_service.submit_customer_details(
+        customer_name=payload.CustomerName,
+        currency_code=payload.CurrencyCode,
+        country_code=payload.CountryCode,
+        mobile_no=payload.MobileNo,
+        email_address=payload.EmailAddress
+    )
+    if not result.get("success"):
+        status_code = result.get("status_code") or 502
+        if status_code in (422, 400):
+            raise HTTPException(status_code=status_code, detail=result.get("message"))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY if status_code >= 500 else status_code,
+            detail=result.get("message") or "External customer service submission failed."
+        )
+    return result
 
 
 @api_router.post("/chat/send", response_model=SendMessageResponse)

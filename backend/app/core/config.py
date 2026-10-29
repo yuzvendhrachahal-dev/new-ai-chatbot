@@ -68,6 +68,14 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "720"))
 
     INTERNAL_AGENT_KEY: str = os.getenv("INTERNAL_AGENT_KEY", "astro-agent-secret-token")
+
+    # AstroVed External QA WebService & JWT Token
+    ASTROVED_JWT_TOKEN: str = os.getenv("ASTROVED_JWT_TOKEN", "")
+    ASTROVED_QA_ENDPOINT: str = os.getenv(
+        "ASTROVED_QA_ENDPOINT",
+        "https://qawebservice.astroved.com/api/UserAccount/AddChatBotDetails"
+    )
+
     CORS_ORIGINS: Union[List[str], str] = ["*"]
 
     @field_validator("CORS_ORIGINS", mode="before")

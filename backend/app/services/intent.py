@@ -30,6 +30,7 @@ ASTRO_CONTEXT_PATTERNS = [
 
 HANDOFF_RULES: Dict[str, List[str]] = {
     CATEGORY_PAYMENT: [
+        r"^(?:💳\s*)?payment\s*(?:issue|problem|failed|support)?\b",
         r"\bpayment\s*(?:failed|issue|error|problem|declined|not\s+working|stuck|pending|dispute)\b",
         r"\b(?:pay|pymnt|paymnt)\s*(?:failed|issue|error|declined)\b",
         r"\bmoney\s*(?:deducted|debited|lost|cut|taken)\b",
@@ -97,6 +98,7 @@ HANDOFF_RULES: Dict[str, List[str]] = {
         r"\bpassword\s*reset\s*(?:failed|not\s*working)\b"
     ],
     CATEGORY_HUMAN: [
+        r"^(?:🤝\s*)?(?:talk\s+to\s+human|talk\s+to\s+agent|talk\s+to\s+advisor|human\s+support)\b",
         r"\b(?:talk|speak)\s+(?:to|with)\s+(?:a\s+)?(?:human|person|agent|advisor|representative|executive|operator|someone|somebody|team)\b",
         r"\b(?:connect|transfer)\s+(?:me\s+)?to\s+(?:a\s+)?(?:human|person|agent|advisor|representative|executive|operator|team|astrologer|someone)\b",
         r"\bconnect\s+me\b",
@@ -171,9 +173,10 @@ SMALL_TALK_PATTERNS = [
     r"^(?:(?:hi|hello|hey|namaste)[\s,]+)?(?:who\s+are\s+you|what\s+can\s+you\s+do|what\s+is\s+your\s+name)[\s?.]*$",
 ]
 
-def detect_greeting_intent(text: str) -> Optional[str]:
+def detect_greeting_intent(text: str, has_history: bool = False) -> Optional[str]:
     """
     Recognizes casual greetings, thanks, and small talk before RAG retrieval.
+    Prevents repeating 'Welcome to AstroVed' on subsequent turns when has_history is True.
     Returns a warm, concise natural response or None if the query should proceed to RAG.
     """
     if not text or not text.strip():
@@ -184,13 +187,22 @@ def detect_greeting_intent(text: str) -> Optional[str]:
     # 1. Greetings (hi, hello, hey, good morning, etc.)
     for pat in GREETING_PATTERNS:
         if re.search(pat, cleaned, re.IGNORECASE):
-            if "morning" in cleaned:
-                return "Namaste! Good morning and welcome to AstroVed. How can I help you today?"
-            if "evening" in cleaned:
-                return "Namaste! Good evening and welcome to AstroVed. How can I help you today?"
-            if "afternoon" in cleaned:
-                return "Namaste! Good afternoon and welcome to AstroVed. How can I help you today?"
-            return "Namaste! Welcome to AstroVed. How can I help you today?"
+            if has_history:
+                if "morning" in cleaned:
+                    return "Namaste! Good morning. How may I assist your Vedic astrology journey today?"
+                if "evening" in cleaned:
+                    return "Namaste! Good evening. How may I assist your Vedic astrology journey today?"
+                if "afternoon" in cleaned:
+                    return "Namaste! Good afternoon. How may I assist your Vedic astrology journey today?"
+                return "Namaste! How may I assist your Vedic astrology journey today?"
+            else:
+                if "morning" in cleaned:
+                    return "Namaste! Good morning and welcome to AstroVed. How can I help you today?"
+                if "evening" in cleaned:
+                    return "Namaste! Good evening and welcome to AstroVed. How can I help you today?"
+                if "afternoon" in cleaned:
+                    return "Namaste! Good afternoon and welcome to AstroVed. How can I help you today?"
+                return "Namaste! Welcome to AstroVed. How can I help you today?"
 
     # 2. Gratitude (thanks, thank you, etc.)
     for pat in THANKS_PATTERNS:
@@ -203,5 +215,66 @@ def detect_greeting_intent(text: str) -> Optional[str]:
             if any(w in cleaned for w in ["who", "what can you do", "name"]):
                 return "Namaste! I am AstroVed AI, your Vedic Astrology guide. I can help answer queries about your birth chart, planetary transits, dasha periods, and remedial pujas. How can I assist you today?"
             return "Namaste! I am doing well, guided by the cosmic rhythm. How can I assist your Vedic astrology journey today?"
+
+    return None
+
+
+def detect_quick_action_intent(text: str) -> Optional[str]:
+    """
+    Detects clicks or inputs for predefined quick-action buttons:
+    - Today's Horoscope
+    - Free Birth Chart
+    - Compatibility Match
+    - Remedies
+    Note: Payment Issue and Talk to Human are handled by detect_support_handoff_intent
+    with priority.
+    """
+    if not text or not text.strip():
+        return None
+
+    cleaned = text.strip().lower()
+
+    # 1. Today's Horoscope
+    if re.search(r"^(?:🌙\s*)?(?:today'?s?\s+)?horoscope\b", cleaned) or cleaned in ["today's horoscope", "todays horoscope", "horoscope"]:
+        return (
+            "Namaste! To view Today's Horoscope, please share your Moon sign (Rashi) or Sun sign (e.g., Aries / Mesha, Taurus / Vrishabha).\n\n"
+            "If you are unsure of your Vedic Moon sign, you can provide your **Date, Time, and Place of Birth**, and I will be happy to determine it for you."
+        )
+
+    # 2. Free Birth Chart
+    if re.search(r"^(?:📊\s*)?(?:free\s+)?birth\s*chart\b", cleaned) or cleaned in ["free birth chart", "birth chart", "kundli", "janam patri"]:
+        return (
+            "Namaste! To generate your Free Vedic Birth Chart (Kundli / Janam Patri), please provide your exact birth details:\n\n"
+            "1. **Date of Birth** (DD-MM-YYYY)\n"
+            "2. **Exact Time of Birth** (e.g., 07:45 AM / 19:30)\n"
+            "3. **Place of Birth** (City, State, Country)\n\n"
+            "With these details, our Vedic system calculates your Ascendant (Lagna), Moon sign (Rashi), Nakshatra, and current planetary Dasha cycles."
+        )
+
+    # 3. Compatibility Match
+    if re.search(r"^(?:💑\s*)?compatibility\s*(?:match(?:ing)?)?\b", cleaned) or cleaned in ["compatibility match", "compatibility", "kundli milan", "gun milan"]:
+        return (
+            "Namaste! For Vedic Kundli Matching (Ashtakoota 36 Guna Milan) to assess marital harmony and compatibility, please share the birth coordinates for both partners:\n\n"
+            "**Partner 1:**\n"
+            "- Date of Birth\n"
+            "- Time of Birth\n"
+            "- Place of Birth\n\n"
+            "**Partner 2:**\n"
+            "- Date of Birth\n"
+            "- Time of Birth\n"
+            "- Place of Birth\n\n"
+            "We evaluate mental affinity, health, prosperity, and longevity for marital harmony."
+        )
+
+    # 4. Remedies
+    if re.search(r"^(?:🌿\s*)?remedies\b", cleaned) or cleaned in ["remedies", "vedic remedies"]:
+        return (
+            "Namaste! Vedic remedies (Upayas) harmonize planetary energies and alleviate karmic doshas. Here are key remedy categories:\n\n"
+            "1. **Planetary & Dosha Remedies:** Offerings for Saturn (Sade Sati/Shani), Rahu-Ketu, and Kuja/Manglik doshas.\n"
+            "2. **Career & Financial Remedies:** Pujas and homams dedicated to Ganesha and Lakshmi for success and prosperity.\n"
+            "3. **Love & Relationship Remedies:** Sacred rituals to resolve conflicts, overcome delays, and restore harmony.\n"
+            "4. **Health & Longevity Remedies:** Ayush and Mrityunjaya homams for vitality and healing.\n\n"
+            "You can also ask directly for specific offerings, such as *'suggest me a saturn ritual'*, *'suggest me love pooja'*, or *'recommend a gemstone'*."
+        )
 
     return None

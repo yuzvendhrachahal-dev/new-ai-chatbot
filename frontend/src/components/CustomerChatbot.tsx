@@ -552,10 +552,6 @@ export const CustomerChatbot: React.FC<CustomerChatbotProps> = () => {
     e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
   };
 
-  const handleTalkToTeam = () => {
-    handleRequestHumanSupport('Live Advisor Request');
-  };
-
   const handleRequestHumanSupport = async (issueType?: string) => {
     if (!conversationId) {
       setScreen('crm');
@@ -966,6 +962,14 @@ export const CustomerChatbot: React.FC<CustomerChatbotProps> = () => {
                       handleRequestHumanSupport('Live Advisor Request');
                     } else if (opt.includes('Payment Issue')) {
                       handleSendMessage('Payment issue with my order');
+                    } else if (opt.includes("Today's Horoscope")) {
+                      handleSendMessage("Today's Horoscope");
+                    } else if (opt.includes('Free Birth Chart')) {
+                      handleSendMessage('Free Birth Chart');
+                    } else if (opt.includes('Compatibility Match')) {
+                      handleSendMessage('Compatibility Match');
+                    } else if (opt.includes('Remedies')) {
+                      handleSendMessage('Remedies');
                     } else {
                       handleSendMessage(opt);
                     }
