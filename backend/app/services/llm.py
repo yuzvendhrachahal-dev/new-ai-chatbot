@@ -4,9 +4,15 @@ import httpx
 from typing import List, Dict, Tuple, Optional
 from app.core.config import settings
 from app.services.knowledge import knowledge_service
-from app.services.astroved_faq import astroved_faq_service
-from app.services.intent import detect_greeting_intent, detect_quick_action_intent
-from app.services.catalog import catalog_service, is_product_query
+from app.services.intent import (
+    detect_greeting_intent,
+    detect_quick_action_intent,
+    detect_birth_details_submission,
+    is_horoscope_intent,
+    classify_user_intent_and_category,
+    detect_support_handoff_intent
+)
+from app.services.catalog import catalog_service, is_product_query, apply_result_rules
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +26,12 @@ ROLE & COMMUNICATION STYLE:
 - When no specific reference material matches, answer general astrology questions using your broad Vedic astrology knowledge, while clearly distinguishing traditional spiritual beliefs from established astronomical or empirical facts.
 - Offer spiritual encouragement and suggest personalized birth chart analysis with AstroVed astrologers when complex personal life timing is discussed.
 - Use clean, well-formatted markdown for readability.
+
+NO FAKE ASTROLOGY CALCULATIONS OR BIRTH CHART FABRICATION:
+- You do NOT have an active astrology calculation API connected in this chat.
+- NEVER fabricate, invent, or estimate Ascendant (Lagna), Moon sign, planetary placements, degrees, or Dasha periods when a user provides their birth details.
+- Direct seekers requesting birth chart calculations to AstroVed's official Free Birth Chart tool.
+- If previous birth details appear in earlier messages in the conversation history, do NOT let those details alter or distort your response to unrelated future questions. Answer the current question directly and factually without pretending to calculate or interpret a personal chart from past details.
 
 CONVERSATION CONTINUITY & ANTI-REPETITION:
 - You are in an ongoing consultation. DO NOT say "Welcome to AstroVed" or repeat introductory welcome greetings on subsequent turns. Answer the seeker's question directly, warmly, and concisely.
@@ -72,9 +84,11 @@ OFF_TOPIC_REDIRECT_MESSAGE = (
 # Deterministic security rules against prompt injection & credential extraction
 # Note: Designed to avoid false positives on legitimate astrology queries like "Should I ignore Saturn?"
 SECURITY_INJECTION_PATTERNS = [
-    r"\b(?:ignore|disregard|forget|bypass|override)\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|system|developer|above)?\s*(?:instructions|rules|prompts|directives)(?:\s+above)?\b",
-    r"\b(?:reveal|show|print|display|tell\s+me|what\s+is|what\s+are|dump|repeat)\s+(?:the\s+|your\s+)?(?:system|developer|hidden|initial|backend)\s+(?:prompt|instructions|rules|message)\b",
-    r"\b(?:reveal|show|print|display|tell\s+me|what\s+is|what\s+are|give\s+me)\s+(?:the\s+|your\s+)?(?:openai[-_\s]*api[-_\s]*key|api[-_\s]*key|jwt[-_\s]*secret|secret[-_\s]*key|private[-_\s]*key|bearer\s+token|env(?:ironment)?\s+variables?|credentials|passwords?)\b",
+    r"\b(?:ignore|disregard|forget|bypass|override)\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|system|developer|above|guardrails?)?\s*(?:instructions|rules|prompts|directives|guardrails?)(?:\s+above)?\b",
+    r"\b(?:reveal|show|print|display|tell\s+me|what\s+is|what\s+are|dump|repeat|exfiltrat\w*)\s+(?:the\s+|your\s+)?(?:system|developer|hidden|initial|backend)\s+(?:prompt|instructions|rules|message)\b",
+    r"\b(?:reveal|show|print|display|tell\s+me|what\s+is|what\s+are|dump|repeat)\s+(?:the\s+|your\s+)?(?:instructions|rules|directives)\b",
+    r"\b(?:system\s+prompt\s+(?:exfiltration|leak|dump))\b",
+    r"\b(?:reveal|show|print|display|tell\s+me|what\s+is|what\s+are|give\s+me)\s+(?:the\s+|your\s+)?(?:[\w\s]{0,20})?(?:openai[-_\s]*api[-_\s]*key|api[-_\s]*key|jwt[-_\s]*secret|secret[-_\s]*key|private[-_\s]*key|bearer\s+token|env(?:ironment)?\s+variables?|credentials|passwords?|mongodb\s*(?:uri|url))\b",
     r"\b(?:you\s+are\s+now|act\s+as|pretend\s+to\s+be)\s+(?:dan|developer\s+mode|unrestricted|jailbreak|system\s+admin|root\s+user)\b",
     r"\b(?:dump|reveal|show|extract)\s+(?:all\s+)?(?:database|mongo(?:db)?|customer\s+records|users?|conversations?)\b",
 ]
@@ -125,22 +139,42 @@ class LLMService:
             return SECURITY_REFUSAL_MESSAGE, True, []
 
         # 2. Intent Check: Check if message is a greeting / gratitude / casual small talk
-        # Greetings and ordinary conversational messages must not trigger product searches
+        # Greetings and ordinary conversational messages must not trigger product searches or knowledge lookups
         has_history = bool(history and len(history) > 0)
         greeting = detect_greeting_intent(user_message, has_history=has_history)
-        is_greeting = greeting is not None
+        if greeting:
+            return greeting, False, []
 
         # 3. Quick-action intent check (Horoscope, Birth Chart, Compatibility, Remedies)
         quick_action_reply = detect_quick_action_intent(user_message)
         if quick_action_reply:
             return quick_action_reply, True, []
 
+        # Check if user message is submitting birth details for chart calculation
+        if detect_birth_details_submission(user_message):
+            birth_chart_reply = (
+                "Namaste! Thank you for sharing your birth details.\n\n"
+                "A direct automated Free Birth Chart / Kundli calculation tool is not currently listed in our service catalogue. "
+                "To have your complete Vedic birth chart accurately calculated with precise planetary degrees, Ascendant (Lagna), "
+                "and active Dasha-Bhukti periods by certified astrologers, you can consult our experts directly on "
+                "[AstroVed Speaks](https://www.astroved.com/astrovedspeaks/chat-with-astrologer) or connect with our customer support team."
+            )
+            return birth_chart_reply, True, []
+
         api_key = settings.OPENAI_API_KEY.strip()
 
-        # 4. Product / Service Query Check:
-        # Queries with product intent must trigger catalog search BEFORE general LLM response
-        if not is_greeting and is_product_query(user_message):
-            matched_products = catalog_service.search(user_message, top_k=3)
+        # 4. Intent & Category Classification
+        classification = classify_user_intent_and_category(user_message)
+        intent = classification.get("intent")
+        category = classification.get("category")
+
+        # 5. Off-Topic Check
+        if intent == "off_topic":
+            return OFF_TOPIC_REDIRECT_MESSAGE, True, []
+
+        # 6. Product / Service Recommendation Flow
+        if intent == "product_recommendation" or is_product_query(user_message):
+            matched_products = catalog_service.search(user_message, top_k=None, category=category)
             resp_text, is_mock, sources = await catalog_service.generate_customer_description(
                 query=user_message,
                 products=matched_products,
@@ -149,40 +183,26 @@ class LLMService:
             )
             return sanitize_response(resp_text), is_mock, sources
 
-        # 4. Reference Retrieval (General Astrology & Knowledge):
-        # Greetings, thanks, and small talk bypass reference lookup entirely.
-        # When RAG_ENABLED is True, query future RAG knowledge service.
-        # When RAG_ENABLED is False (default), query the starter AstroVed FAQ reference module.
+        # 7. Knowledge Retrieval (LangChain RAG Pipeline):
+        # When RAG_ENABLED is True, query approved knowledge and generate grounded answer
+        # Return an honest no-match response when evidence is insufficient
+        rag_enabled = getattr(settings, "RAG_ENABLED", False)
         sources = []
         retrieved_docs = []
-        rag_enabled = getattr(settings, "RAG_ENABLED", False)
 
-        if not is_greeting:
-            if rag_enabled:
-                retrieved_docs = knowledge_service.retrieve(user_message, top_k=2)
-            else:
-                retrieved_docs = astroved_faq_service.find_matching_references(user_message, top_k=2)
-
-            for doc in retrieved_docs:
-                sources.append({
-                    "title": doc.get("title"),
-                    "source": doc.get("source"),
-                    "document_id": doc.get("id") or doc.get("document_id")
-                })
-
-        # 4. If OpenAI API key is NOT configured (e.g. offline / development mode)
-        if not api_key:
-            # Greetings return a warm natural greeting without reference lookup
-            if is_greeting:
-                return greeting, True, []
-
-            # If reference documents were matched, format with verified citations
+        if rag_enabled:
+            retrieved_docs = knowledge_service.retrieve(user_message, top_k=3, category=category)
             if retrieved_docs:
-                doc = retrieved_docs[0]
-                source_links = "\n".join([f"- [{d['title']} | AstroVed.com]({d['source']})" for d in sources])
-                return f"{doc['content']}\n\nSource:\n{source_links}", True, sources
+                resp_text, is_mock, sources = await knowledge_service.generate_grounded_answer(
+                    query=user_message,
+                    retrieved_docs=retrieved_docs,
+                    api_key=api_key,
+                    model=settings.OPENAI_MODEL
+                )
+                return sanitize_response(resp_text), is_mock, sources
 
-            # When OpenAI is not configured and no approved reference matches, do not fabricate fake answers
+        # 8. If OpenAI API key is NOT configured (e.g. offline / development mode)
+        if not api_key:
             return TEMPORARY_UNAVAILABLE_MESSAGE, True, []
 
         # 5. OpenAI API is configured -> Call OpenAI Chat Completions
@@ -234,14 +254,10 @@ class LLMService:
                     return sanitize_response(answer), False, sources
                 else:
                     logger.warning("OpenAI API returned non-200 status: %d", res.status_code)
-                    if is_greeting:
-                        return greeting, True, []
                     return TEMPORARY_UNAVAILABLE_MESSAGE, True, sources
 
         except Exception as err:
             logger.warning("OpenAI API request exception: %s", err)
-            if is_greeting:
-                return greeting, True, []
             return TEMPORARY_UNAVAILABLE_MESSAGE, True, sources
 
 llm_service = LLMService()

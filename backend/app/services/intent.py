@@ -30,7 +30,7 @@ ASTRO_CONTEXT_PATTERNS = [
 
 HANDOFF_RULES: Dict[str, List[str]] = {
     CATEGORY_PAYMENT: [
-        r"^(?:💳\s*)?payment\s*(?:issue|problem|failed|support)?\b",
+        r"^(?:💳\s*)?payment(?:\s+(?:issue|problem|failed|support))?[\s!.]*$",
         r"\bpayment\s*(?:failed|issue|error|problem|declined|not\s+working|stuck|pending|dispute)\b",
         r"\b(?:pay|pymnt|paymnt)\s*(?:failed|issue|error|declined)\b",
         r"\bmoney\s*(?:deducted|debited|lost|cut|taken)\b",
@@ -99,8 +99,8 @@ HANDOFF_RULES: Dict[str, List[str]] = {
     ],
     CATEGORY_HUMAN: [
         r"^(?:🤝\s*)?(?:talk\s+to\s+human|talk\s+to\s+agent|talk\s+to\s+advisor|human\s+support)\b",
-        r"\b(?:talk|speak)\s+(?:to|with)\s+(?:a\s+)?(?:human|person|agent|advisor|representative|executive|operator|someone|somebody|team)\b",
-        r"\b(?:connect|transfer)\s+(?:me\s+)?to\s+(?:a\s+)?(?:human|person|agent|advisor|representative|executive|operator|team|astrologer|someone)\b",
+        r"\b(?:talk|speak)\s+(?:to|with)\s+(?:an?\s+)?(?:human|person|agent|advisor|representative|executive|operator|astrologer|someone|somebody|team)\b",
+        r"\b(?:connect|transfer)\s+(?:me\s+)?to\s+(?:an?\s+)?(?:human|person|agent|advisor|representative|executive|operator|team|astrologer|someone)\b",
         r"\bconnect\s+me\b",
         r"\bcall\s+me\b",
         r"\bcontact\s+(?:your\s+)?team\b",
@@ -109,7 +109,7 @@ HANDOFF_RULES: Dict[str, List[str]] = {
         r"\b(?:live\s*agent|customer\s*support|customer\s*care|representative)\b",
         r"\b(?:human\s*assistance|human\s*agent|human\s*help)\b",
         r"\b(?:talk\s*to\s*someone|speak\s*to\s*someone)\b",
-        r"\bi\s*(?:want|need)\s*(?:to\s*speak\s*with|to\s*talk\s*to)?\s*(?:a\s*)?(?:human|live\s*agent|advisor|representative)\b",
+        r"\bi\s*(?:want|need)\s*(?:to\s*speak\s*with|to\s*talk\s*to)?\s*(?:an?\s+)?(?:human|live\s*agent|advisor|representative|astrologer)\b",
         r"^(?:human|live\s*agent|advisor|representative|customer\s*support|customer\s*care)\b",
         r"\b(?:agent|human|representative|advisor)\s+please\b",
         r"\bplease\s+(?:connect|transfer)\s+me\b"
@@ -219,55 +219,95 @@ def detect_greeting_intent(text: str, has_history: bool = False) -> Optional[str
     return None
 
 
+def detect_birth_details_submission(text: str) -> bool:
+    """
+    Detects when a user is providing their birth coordinates (date, time, place)
+    for chart calculation.
+    """
+    if not text or not text.strip():
+        return False
+    cleaned = text.strip().lower()
+
+    has_dob_keyword = bool(re.search(r"\b(?:dob|date of birth|birth date|born on|birth details|my details|birth info|birth coordinates)\b", cleaned))
+    has_tob_keyword = bool(re.search(r"\b(?:tob|time of birth|birth time|born at)\b", cleaned))
+    has_pob_keyword = bool(re.search(r"\b(?:pob|place of birth|birth place|born in|birthplace)\b", cleaned))
+
+    has_date_pattern = bool(
+        re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", cleaned) or
+        re.search(r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{2,4}\b", cleaned)
+    )
+    has_time_pattern = bool(re.search(r"\b\d{1,2}[:.]\d{2}\s*(?:am|pm)?\b", cleaned))
+
+    if has_dob_keyword:
+        return True
+    if has_date_pattern and (has_time_pattern or has_tob_keyword or has_pob_keyword):
+        return True
+
+    return False
+
+
+def is_horoscope_intent(text: str) -> bool:
+    """
+    Detects questions inquiring about horoscope or daily predictions:
+    - Today's horoscope
+    - Daily horoscope
+    - Horoscope today
+    - My daily prediction
+    - Horoscope for my zodiac sign
+    """
+    if not text or not text.strip():
+        return False
+    cleaned = text.strip().lower()
+    patterns = [
+        r"\b(?:today'?s?\s+)?horoscope\b",
+        r"\bhoroscope\s+today\b",
+        r"\bdaily\s+horoscope\b",
+        r"\b(?:my\s+)?daily\s+prediction\b",
+        r"\bhoroscope\s+for\s+(?:my\s+)?(?:zodiac\s+)?sign\b",
+        r"\b(?:aries|taurus|gemini|cancer|leo|virgo|libra|scorpio|sagittarius|capricorn|aquarius|pisces)\s+horoscope\b"
+    ]
+    return any(re.search(pat, cleaned) for pat in patterns)
+
+
 def detect_quick_action_intent(text: str) -> Optional[str]:
     """
-    Detects clicks or inputs for predefined quick-action buttons:
-    - Today's Horoscope
-    - Free Birth Chart
-    - Compatibility Match
-    - Remedies
-    Note: Payment Issue and Talk to Human are handled by detect_support_handoff_intent
-    with priority.
+    Intelligent routing using the complete URL catalogue (url_catalogue_service).
+    Detects user intent and returns a clickable feature card or helpful response.
+    Never returns Astropedia home or domain root for specific tool requests.
+    Does not intercept ordinary informational astrology questions.
     """
     if not text or not text.strip():
         return None
 
-    cleaned = text.strip().lower()
+    cleaned = text.strip()
+    cleaned_lower = cleaned.lower()
 
-    # 1. Today's Horoscope
-    if re.search(r"^(?:🌙\s*)?(?:today'?s?\s+)?horoscope\b", cleaned) or cleaned in ["today's horoscope", "todays horoscope", "horoscope"]:
-        return (
-            "Namaste! To view Today's Horoscope, please share your Moon sign (Rashi) or Sun sign (e.g., Aries / Mesha, Taurus / Vrishabha).\n\n"
-            "If you are unsure of your Vedic Moon sign, you can provide your **Date, Time, and Place of Birth**, and I will be happy to determine it for you."
-        )
+    # Product recommendation queries (e.g. "suggest me a pooja", "recommend a gemstone", "lost my job, suggest a pooja")
+    # must go to the product catalog service (Excel catalog) rather than static URL navigation.
+    is_product_recommendation = any(
+        w in cleaned_lower for w in ["suggest", "recommend", "show me offerings", "buy", "purchase", "order"]
+    ) or "lost my job" in cleaned_lower
+    if is_product_recommendation:
+        return None
 
-    # 2. Free Birth Chart
-    if re.search(r"^(?:📊\s*)?(?:free\s+)?birth\s*chart\b", cleaned) or cleaned in ["free birth chart", "birth chart", "kundli", "janam patri"]:
-        return (
-            "Namaste! To generate your Free Vedic Birth Chart (Kundli / Janam Patri), please provide your exact birth details:\n\n"
-            "1. **Date of Birth** (DD-MM-YYYY)\n"
-            "2. **Exact Time of Birth** (e.g., 07:45 AM / 19:30)\n"
-            "3. **Place of Birth** (City, State, Country)\n\n"
-            "With these details, our Vedic system calculates your Ascendant (Lagna), Moon sign (Rashi), Nakshatra, and current planetary Dasha cycles."
-        )
+    # Rule 5: Do not let URL routing intercept ordinary informational questions
+    informational_prefixes = (
+        "what is", "what are", "what does", "what do", "what can", "what will", "what would",
+        "why is", "why are", "why does", "why do", "why would",
+        "explain", "tell me about", "meaning of", "can you explain", "could you explain",
+        "how does", "how do", "how is", "how can", "how will", "difference between",
+        "which house", "which planet", "which rashi", "which sign",
+        "who is", "when does", "when will", "where is"
+    )
+    if any(cleaned_lower.startswith(p) for p in informational_prefixes):
+        # Allow pure knowledge/conversational flow to handle
+        return None
 
-    # 3. Compatibility Match
-    if re.search(r"^(?:💑\s*)?compatibility\s*(?:match(?:ing)?)?\b", cleaned) or cleaned in ["compatibility match", "compatibility", "kundli milan", "gun milan"]:
-        return (
-            "Namaste! For Vedic Kundli Matching (Ashtakoota 36 Guna Milan) to assess marital harmony and compatibility, please share the birth coordinates for both partners:\n\n"
-            "**Partner 1:**\n"
-            "- Date of Birth\n"
-            "- Time of Birth\n"
-            "- Place of Birth\n\n"
-            "**Partner 2:**\n"
-            "- Date of Birth\n"
-            "- Time of Birth\n"
-            "- Place of Birth\n\n"
-            "We evaluate mental affinity, health, prosperity, and longevity for marital harmony."
-        )
+    if any(k in cleaned_lower for k in ["10th house", "karma bhava", "7th house", "1st house", "12th house", "exalted venus"]):
+        return None
 
-    # 4. Remedies
-    if re.search(r"^(?:🌿\s*)?remedies\b", cleaned) or cleaned in ["remedies", "vedic remedies"]:
+    # Remedies overview query
+    if re.search(r"^(?:🌿\s*)?remedies\b", cleaned_lower) or cleaned_lower in ["remedies", "vedic remedies"]:
         return (
             "Namaste! Vedic remedies (Upayas) harmonize planetary energies and alleviate karmic doshas. Here are key remedy categories:\n\n"
             "1. **Planetary & Dosha Remedies:** Offerings for Saturn (Sade Sati/Shani), Rahu-Ketu, and Kuja/Manglik doshas.\n"
@@ -277,4 +317,171 @@ def detect_quick_action_intent(text: str) -> Optional[str]:
             "You can also ask directly for specific offerings, such as *'suggest me a saturn ritual'*, *'suggest me love pooja'*, or *'recommend a gemstone'*."
         )
 
+    # Check complete URL catalogue for service/tool intent
+    from app.services.url_catalogue import url_catalogue_service
+
+    match = url_catalogue_service.search(cleaned)
+
+    # Multi-intent: user requested both an available feature and a missing service (e.g. horoscope + birth chart)
+    if match.entry and match.missing_service_msg:
+        partner_context = ""
+        if "horoscope-matching" in match.entry.url:
+            partner_context = "For Vedic Kundli matching to assess marital harmony between Partner 1 and Partner 2:\n\n"
+        return (
+            f"Namaste! {partner_context}Here is the official AstroVed destination for your request:\n\n"
+            f"{url_catalogue_service.format_feature_card(match.entry)}\n\n"
+            f"**Regarding your Free Birth Chart request:**\n"
+            f"{match.missing_service_msg}"
+        )
+
+    if match.missing_service_msg:
+        return match.missing_service_msg
+
+    if match.is_ambiguous and match.clarification_prompt:
+        return match.clarification_prompt
+
+    if match.entry and match.confidence >= 0.40:
+        entry = match.entry
+        # If user explicitly asks for compatibility matching, mention partner 1 & 2 context
+        partner_context = ""
+        if "horoscope-matching" in entry.url:
+            partner_context = "For Vedic Kundli matching to assess marital harmony between Partner 1 and Partner 2:\n\n"
+
+        return (
+            f"Namaste! {partner_context}Here is the official AstroVed destination for your request:\n\n"
+            f"{url_catalogue_service.format_feature_card(entry)}"
+        )
+
     return None
+
+
+# Category Keywords Map for Intent & Category Classification
+CATEGORY_PATTERNS = {
+    "career": [
+        r"\b(?:career|job|jobs|employment|profession|business|workplace|promotion|unemployed|unemployment)\b",
+        r"\b(?:lost\s+my\s+job|lost\s+job|job\s+loss|fired|laid\s+off|jobless)\b",
+        r"\b(?:work|profession|vocation|office|corporate)\b",
+    ],
+    "love_relationship": [
+        r"\b(?:love|romance|relationship|relationships|marriage|marital|partner|spouse|husband|wife|dating)\b",
+        r"\b(?:breakup|divorce|separation|kundli\s*milan|gun\s*milan|soulmate)\b",
+    ],
+    "saturn_shani": [
+        r"\b(?:saturn|shani|sani|sade\s*sati|saniswaran|shaniswara|shanidev|kantaka\s*shani|ashtama\s*shani)\b",
+    ],
+    "wealth": [
+        r"\b(?:wealth|money|financial|finances|prosperity|debt|loans|poverty|cash\s*flow|rich|income)\b",
+        r"\b(?:lakshmi|kubera)\b",
+    ],
+    "health": [
+        r"\b(?:health|illness|disease|vitality|healing|longevity|recovery|ayush|mrityunjaya|dhanvantari)\b",
+    ],
+    "dosha": [
+        r"\b(?:dosha|doshas|mangal\s*dosha|kuja\s*dosha|kaal\s*sarp|rahu|ketu|pitru\s*dosha|nadi\s*dosha)\b",
+    ],
+    "gemstone": [
+        r"\b(?:gemstones?|ratna|ruby|emerald|yellow\s*sapphire|blue\s*sapphire|pukhraj|neelam|manikya|panna)\b",
+    ]
+}
+
+OFF_TOPIC_PATTERNS = [
+    r"\b(?:code|python|javascript|java|c\+\+|programming|software|debug|script|compile)\b",
+    r"\b(?:car\s+repair|mechanic|flat\s+tire|bicycle|engine|oil\s+change|brake\s+pads)\b",
+    r"\b(?:football|soccer|basketball|cricket\s+score|nba|fifa|olympics)\b",
+    r"\b(?:pizza\s+recipe|bake\s+cake|cooking\s+recipe|cocktail|ingredients)\b",
+    r"\b(?:geopolitics|election\s+poll|presidential\s+debate|war\s+news|stock\s+market\s+ticker)\b",
+    r"\b(?:solve\s+math|calculus|algebra|physics\s+homework)\b",
+]
+
+def classify_user_intent_and_category(query: str, api_key: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Classifies user message into intent, category, and concern:
+    - Intent: 'greeting' | 'support_handoff' | 'quick_action' | 'product_recommendation' | 'astrology_knowledge' | 'off_topic'
+    - Category: 'career' | 'love_relationship' | 'saturn_shani' | 'wealth' | 'health' | 'dosha' | 'gemstone' | 'general_astrology' | 'off_topic'
+    - Concern: summary of seeker's underlying concern
+    """
+    if not query or not query.strip():
+        return {"intent": "greeting", "category": "conversational", "concern": ""}
+
+    cleaned = query.strip().lower()
+
+    # 1. Support Handoff Check
+    is_handoff, handoff_category = detect_support_handoff_intent(query)
+    if is_handoff:
+        return {
+            "intent": "support_handoff",
+            "category": handoff_category or CATEGORY_HUMAN,
+            "concern": handoff_category or "Support Request"
+        }
+
+    # 2. Greeting / Gratitude / Small Talk Check
+    greeting = detect_greeting_intent(query)
+    if greeting is not None:
+        return {
+            "intent": "greeting",
+            "category": "conversational",
+            "concern": ""
+        }
+
+    # 3. Quick Action Check
+    quick_action = detect_quick_action_intent(query)
+    if quick_action is not None:
+        return {
+            "intent": "quick_action",
+            "category": "quick_action",
+            "concern": cleaned
+        }
+
+    # 4. Off-topic check (guards against software, car repair, sports, recipes, etc.)
+    for off_pat in OFF_TOPIC_PATTERNS:
+        if re.search(off_pat, cleaned, re.IGNORECASE):
+            return {
+                "intent": "off_topic",
+                "category": "off_topic",
+                "concern": cleaned
+            }
+
+    # 5. Extract category
+    detected_category = "general_astrology"
+    for cat_name, patterns in CATEGORY_PATTERNS.items():
+        if any(re.search(p, cleaned, re.IGNORECASE) for p in patterns):
+            detected_category = cat_name
+            break
+
+    # 6. Extract recommendation intent vs astrology knowledge
+    recommendation_cues = [
+        r"\b(?:suggest|recommend|recommendation|suggestion|find|show\s+me|give\s+me|options\s+for)\b",
+        r"\b(?:buy|purchase|order|book|booking|cost|price|fee|inr)\b",
+        r"\b(?:which\s+pooja|what\s+pooja|which\s+ritual|what\s+ritual|which\s+gemstone)\b",
+        r"\b(?:love\s+pooja|saturn\s+ritual|saturn\s+pooja|shani\s+ritual)\b",
+        r"\b(?:lost\s+my\s+job|lost\s+job|unemployed)\b"
+    ]
+    is_recommendation = any(re.search(cue, cleaned, re.IGNORECASE) for cue in recommendation_cues)
+
+    # Conceptual astrology queries should remain 'astrology_knowledge'
+    is_conceptual = any(
+        cleaned.startswith(p) for p in [
+            "what is ", "what are ", "what does ", "explain ", "meaning of ", "who is ", "difference between ", "tell me about "
+        ]
+    ) and not any(w in cleaned for w in ["suggest", "recommend", "buy", "book", "cost", "price", "show me"])
+
+    if is_recommendation and not is_conceptual:
+        intent = "product_recommendation"
+    else:
+        intent = "astrology_knowledge"
+
+    # Extract concern
+    concern = cleaned
+    if "lost my job" in cleaned or "lost job" in cleaned:
+        concern = "job loss and career obstacles"
+    elif "love" in cleaned or "relationship" in cleaned:
+        concern = "love and relationship harmony"
+    elif "saturn" in cleaned or "shani" in cleaned or "sade sati" in cleaned:
+        concern = "Saturn transit and Sade Sati relief"
+
+    return {
+        "intent": intent,
+        "category": detected_category,
+        "concern": concern
+    }
+

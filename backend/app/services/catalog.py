@@ -121,6 +121,8 @@ PRODUCT_INTENT_KEYWORDS = [
     r"\b(?:suggest|recommend|find|show|give|get)\s+(?:me\s+)?(?:a\s+|some\s+)?(?:[\w\s]+\s+)?(?:rituals?|poojas?|pujas?|homams?|services?|packages?|remedies|products?|offerings?|gemstones?)\b",
     r"\b(?:suggest|recommend)\s+(?:me\s+)?(?:a\s+)?(?:love|saturn|shani|wealth|gemstone|relationship)\s+(?:pooja|ritual|homam|gemstone)?\b",
     r"\b(?:love\s+pooja|love\s+ritual|saturn\s+ritual|saturn\s+pooja|shani\s+ritual|recommend\s+a\s+gemstone)\b",
+    r"\b(?:lost\s+my\s+job|lost\s+job|job\s+loss|jobless|unemployed|unemployment)\b",
+    r"\b(?:career|job|profession)\s+(?:pooja|ritual|homam|remedy|remedies|offerings?)\b",
     rf"\b{PLANET_DEITY_TERMS}\s+{RITUAL_TERMS}\b",
     rf"\b{RITUAL_TERMS}\s+(?:for|to|of)\s+{PLANET_DEITY_TERMS}\b",
 ]
@@ -138,6 +140,11 @@ QUICK_ACTION_PATTERNS = [
     r"^(?:📊\s*)?(?:free\s+)?birth\s*chart\b",
     r"^(?:💑\s*)?compatibility\s*(?:match(?:ing)?)?\b",
     r"^(?:🌿\s*)?remedies\b",
+    r"\bdaily\s+horoscope\b",
+    r"\bhoroscope\s+today\b",
+    r"\b(?:my\s+)?daily\s+prediction\b",
+    r"\bkundli\b",
+    r"\bjanam\s*patri\b",
 ]
 
 # Synonyms for token matching in catalog search
@@ -169,6 +176,14 @@ SYNONYMS = {
     "relationship": "love",
     "relationships": "love",
     "marriage": "love",
+    # Career / job mappings
+    "job": "career",
+    "jobs": "career",
+    "employment": "career",
+    "profession": "career",
+    "work": "career",
+    "unemployed": "career",
+    "business": "career",
 }
 
 
@@ -503,6 +518,21 @@ def load_and_normalize_catalog(
 
     return normalized
 
+def apply_result_rules(products: List[NormalizedProduct]) -> List[NormalizedProduct]:
+    """
+    Applies AstroVed product recommendation result rules:
+    - 1 relevant match: show 1.
+    - 2–4 relevant matches: show all.
+    - More than 4 relevant matches: show the top 3.
+    """
+    n = len(products)
+    if n <= 1:
+        return products
+    elif 2 <= n <= 4:
+        return products
+    else:
+        return products[:3]
+
 
 class CatalogService:
     """
@@ -533,14 +563,19 @@ class CatalogService:
             self.initialize()
         return self._product_by_id.get(str(product_id).strip())
 
-    def search(self, query: str, top_k: int = 3) -> List[NormalizedProduct]:
+    def search(
+        self,
+        query: str,
+        top_k: Optional[int] = 3,
+        category: Optional[str] = None
+    ) -> List[NormalizedProduct]:
         """
-        Searches the catalog for query matches using tokenized relevance scoring.
+        Searches the catalog for query matches using tokenized relevance scoring and category awareness.
         Normalizes spelling mistakes and maps relevant synonyms to catalog terms.
-        Distinguishes specific intent/deity/planet terms from generic ritual types.
-        Prefers matches related to specific intent (e.g. love/relationship, saturn, gemstone)
-        and relevant ritual/pooja terms.
-        Returns at most top_k relevant products.
+        Applies AstroVed recommendation result rules:
+        - 1 match: show 1
+        - 2-4 matches: show all
+        - >4 matches: show top 3 (or top_k if explicitly passed)
         """
         if not self._initialized:
             self.initialize()
@@ -561,10 +596,26 @@ class CatalogService:
         generic_ritual_terms = {
             "pooja", "puja", "homam", "homa", "ritual", "rituals",
             "service", "services", "package", "packages", "remedy",
-            "remedies", "consultation", "consult"
+            "remedies", "consultation", "consult", "archana"
         }
         generic_tokens = [t for t in tokens if t in generic_ritual_terms]
         specific_tokens = [t for t in tokens if t not in generic_ritual_terms]
+
+        # Determine target category keywords if category is provided or inferred
+        category_cue_map = {
+            "career": {"career", "job", "employment", "profession", "business", "work", "unemployed", "karuppasamy", "vishnupati"},
+            "love": {"love", "relationship", "marriage", "partner", "romance", "spouse", "muruga", "valli"},
+            "love_relationship": {"love", "relationship", "marriage", "partner", "romance", "spouse", "muruga", "valli"},
+            "saturn": {"saturn", "shani", "sani", "sade sati", "saniswaran", "shaniswara"},
+            "saturn_shani": {"saturn", "shani", "sani", "sade sati", "saniswaran", "shaniswara"},
+            "wealth": {"wealth", "money", "financial", "prosperity", "lakshmi", "kubera"},
+            "health": {"health", "ayush", "mrityunjaya", "dhanvantari", "longevity"},
+            "gemstone": {"gemstone", "ruby", "emerald", "sapphire", "citrine", "mala", "rudraksha"},
+        }
+        active_cat_keywords = category_cue_map.get(category or "", set())
+        for tok in specific_tokens:
+            if tok in category_cue_map:
+                active_cat_keywords.update(category_cue_map[tok])
 
         scored: List[Tuple[float, NormalizedProduct]] = []
 
@@ -573,8 +624,9 @@ class CatalogService:
             desc_words = {canonical_token(w) for w in re.findall(r"\b[a-z0-9]+\b", p.short_description.lower())}
 
             # If specific intent terms were asked (e.g. 'love', 'saturn', 'gemstone'),
-            # require at least one specific term to match in product name or description
-            if specific_tokens and not any(st in name_words or st in desc_words for st in specific_tokens):
+            # require at least one specific term or category keyword to match
+            combined_specific = set(specific_tokens).union(active_cat_keywords)
+            if combined_specific and not any(st in name_words or st in desc_words for st in combined_specific):
                 continue
 
             score = 0.0
@@ -585,14 +637,13 @@ class CatalogService:
             if len(tokens) > 1 and normalized_query in p.product_name.lower():
                 score += 35.0
 
-            matched_specific = sum(1 for st in specific_tokens if st in name_words or st in desc_words)
-            matched_ritual = sum(1 for rt in generic_tokens if rt in name_words or rt in desc_words)
+            matched_specific = sum(1 for st in combined_specific if st in name_words or st in desc_words)
+            matched_ritual = sum(1 for rt in generic_tokens if rt in name_words or rt in desc_words or any(gr in name_words for gr in generic_ritual_terms))
 
             for token in tokens:
                 is_specific = token in specific_tokens
                 weight = 8.0 if is_specific else 2.0
                 if token in name_words:
-                    # Give higher weight to matches in product title
                     score += weight * 5.0
                     matched_tokens += 1
                 elif token in desc_words:
@@ -601,7 +652,18 @@ class CatalogService:
                 else:
                     all_matched = False
 
-            if matched_tokens == 0:
+            # Category synergy bonus (e.g. career keyword + ritual term)
+            if active_cat_keywords:
+                cat_in_name = any(ck in name_words for ck in active_cat_keywords)
+                cat_in_desc = any(ck in desc_words for ck in active_cat_keywords)
+                if cat_in_name:
+                    score += 55.0
+                    matched_tokens += 1
+                elif cat_in_desc:
+                    score += 25.0
+                    matched_tokens += 1
+
+            if matched_tokens == 0 and score == 0.0:
                 continue
 
             # Multi-token bonus if all query tokens matched
@@ -620,21 +682,27 @@ class CatalogService:
             if p.price_inr is not None:
                 score += 2.0
 
-            # Require minimum matched ratio for multi-word queries to avoid false positive partial hits
-            if len(tokens) >= 3 and (matched_tokens / len(tokens)) < 0.4:
+            # Require minimum matched ratio for multi-word queries unless category + ritual matched
+            has_cat_ritual_synergy = matched_specific > 0 and matched_ritual > 0
+            if len(tokens) >= 3 and not has_cat_ritual_synergy and (matched_tokens / len(tokens)) < 0.4:
                 continue
 
             if score >= 10.0:
                 scored.append((score, p))
 
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [p for _, p in scored[:top_k]]
+        raw_results = [p for _, p in scored]
+
+        if top_k is not None:
+            return raw_results[:top_k]
+        return apply_result_rules(raw_results)
 
     def format_offline_response(self, query: str, products: List[NormalizedProduct]) -> str:
         """
         Generates a concise, grounded offline response when the OpenAI LLM is not configured or unavailable.
         Uses the Excel Short Description column as the source, formatted into 2-3 lines.
         Never uses Long Description HTML or fabricates inclusions, benefits, dates, or pricing.
+        Applies result rules: 1 match -> show 1, 2-4 matches -> show all, >4 -> show top 3.
         """
         if not products:
             return (
@@ -643,8 +711,9 @@ class CatalogService:
                 "our live astrology advisors would be glad to assist you. Would you like me to connect you with an advisor?"
             )
 
+        target_products = apply_result_rules(products)
         items_formatted = []
-        for p in products[:3]:
+        for p in target_products:
             raw_desc = (p.short_description or "").strip()
             clean_desc = re.sub(r"<[^>]+>", "", raw_desc)
             clean_desc = strip_dates(clean_desc)
@@ -655,27 +724,30 @@ class CatalogService:
                     short_desc = " ".join(sentences[:3])
                 elif len(sentences) == 2:
                     short_desc = " ".join(sentences[:2])
-                else:
+                elif sentences:
                     short_desc = sentences[0]
                 if not short_desc.endswith("."):
                     short_desc += "."
             else:
-                # If source short description is missing, keep minimal and factual rather than hallucinating
                 short_desc = f"Official Vedic spiritual offering for {p.product_name}."
 
-            lines = [
-                f"### [{p.product_name}]({p.url})",
-                f"**Product Name:** {p.product_name}",
-                short_desc
+            if p.product_status == "Disabled":
+                short_desc += " Remedial reference item (not currently available for direct purchase)."
+
+            card_lines = [
+                ":::product_card",
+                f"name: {p.product_name}",
             ]
             if p.formatted_price:
-                lines.append(f"**Price:** {p.formatted_price}")
-            lines.append(f"- [View Offerings & Details on AstroVed.com]({p.url})")
-            items_formatted.append("\n".join(lines))
+                card_lines.append(f"price: {p.formatted_price}")
+            card_lines.append(f"description: {short_desc}")
+            card_lines.append(f"url: {p.url}")
+            card_lines.append(":::")
+            items_formatted.append("\n".join(card_lines))
 
         result = (
             "Namaste! Here are relevant offerings from the AstroVed catalog:\n\n" +
-            "\n\n---\n\n".join(items_formatted)
+            "\n\n".join(items_formatted)
         )
         return result
 
@@ -690,25 +762,16 @@ class CatalogService:
         Uses product name and short description as input for the configured OpenAI LLM
         to generate a concise, grounded customer-facing recommendation of exactly 2-3 lines.
         Guarantees:
-        - At most 3 relevant AstroVed products.
+        - Result rules: 1 match -> show 1; 2-4 matches -> show all; >4 matches -> show top 3.
         - Uses the Excel Short Description column as the source for each product description.
         - Generates a concise, user-friendly description of exactly 2–3 lines using the LLM, grounded only in that short description.
         - Each result has: product name, short description, valid INR price, and product URL.
+        - Formats as clickable product cards without raw URLs or status.
         - Never uses Long Description HTML or invents benefits, rituals, or product details.
         - If source short description is missing, keeps description minimal and factual rather than hallucinating.
         - Never shows dates or non-INR prices. Never claims purchasability.
         - Returns (response_text, is_mock, sources)
         """
-        sources = [
-            {
-                "title": p.product_name,
-                "source": p.url,
-                "document_id": p.product_id,
-                "price": p.formatted_price
-            }
-            for p in products[:3]
-        ]
-
         if not products:
             no_match_text = (
                 "Namaste. I could not find a matching AstroVed catalog item for your request. "
@@ -717,19 +780,31 @@ class CatalogService:
             )
             return no_match_text, True, []
 
+        target_products = apply_result_rules(products)
+
+        sources = [
+            {
+                "title": p.product_name,
+                "source": p.url,
+                "document_id": p.product_id,
+                "price": p.formatted_price
+            }
+            for p in target_products
+        ]
+
         key = (api_key if api_key is not None else os.getenv("OPENAI_API_KEY", "")).strip()
         target_model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
         # If OpenAI is offline / not configured, use graceful offline template
         if not key:
-            return self.format_offline_response(query, products[:3]), True, sources
+            return self.format_offline_response(query, target_products), True, sources
 
         try:
             import httpx
 
             # Treat spreadsheet content as strictly untrusted reference data
             products_context = []
-            for i, p in enumerate(products[:3], 1):
+            for i, p in enumerate(target_products, 1):
                 clean_desc = re.sub(r"<[^>]+>", "", p.short_description or "").strip()
                 clean_desc = strip_dates(clean_desc)
                 desc_line = (
@@ -738,11 +813,13 @@ class CatalogService:
                     else "Short Description (Source): (Missing in catalog - keep description minimal and factual)"
                 )
                 price_line = f"Price: {p.formatted_price}" if p.formatted_price else "Price: (Omit price - not listed)"
+                status_line = f"Status: {p.product_status}"
                 products_context.append(
                     f"Product #{i}:\n"
                     f"Product Name: {p.product_name}\n"
                     f"{desc_line}\n"
                     f"{price_line}\n"
+                    f"{status_line}\n"
                     f"Product URL: {p.url}"
                 )
 
@@ -750,18 +827,21 @@ class CatalogService:
 
             system_prompt = (
                 "You are AstroVed AI, presenting AstroVed catalog product recommendations to a seeker.\n"
-                "You must strictly adhere to the following rules based ONLY on the catalog products provided below:\n"
-                "1. Return at most 3 relevant AstroVed products.\n"
-                "2. For each product, present ONLY:\n"
-                "   - Product Name: Exact product name from the catalog.\n"
-                "   - Short Description: A concise, user-friendly description of exactly 2–3 lines, grounded ONLY in that product's provided Short Description from the Excel catalog. Never use Long Description HTML or invent benefits, rituals, or product details. If the source short description is missing, keep the description minimal, factual, and brief (1 line) rather than hallucinating.\n"
-                "   - Price: Valid INR price ONLY if provided in the context (e.g., 'Price: ₹530'). If no price or 'Omit price' is given, do not show or mention a price.\n"
-                "   - Product URL: The product URL provided.\n"
-                "3. CRITICAL: Keep the complete response concise. Absolutely NO generic ritual steps, DIY instructions, ritual materials/items, mantra lists, gemstone advice, or lengthy astrology explanations.\n"
-                "4. DO NOT show dates (such as calendar dates or years) or non-INR prices.\n"
-                "5. Never claim any product is currently purchasable, in stock, or that links are verified.\n"
-                "6. Do not invent products, prices, inclusions, or availability.\n"
-                "7. If no relevant products are in the list, politely say no matching AstroVed catalog item was found and offer human advisor support."
+                "You must present the catalog products provided under CATALOG PRODUCTS below according to these rules:\n"
+                "1. Present the catalog products provided under CATALOG PRODUCTS below in the order listed (these items are verified matches from the AstroVed catalog).\n"
+                "2. For each product, output EXACTLY this clean card format:\n"
+                ":::product_card\n"
+                "name: <Exact product name from catalog>\n"
+                "price: <Valid INR price ONLY if provided in context, e.g. ₹530; omit line if not listed>\n"
+                "description: <Concise, user-friendly description of exactly 2–3 lines, grounded ONLY in that product's provided Short Description from the Excel catalog>\n"
+                "url: <Product URL provided>\n"
+                ":::\n"
+                "3. CRITICAL: Do NOT include product headings (like ###), labels like 'Product Name:', or raw URLs outside the card.\n"
+                "4. Do NOT show product status (Active/Disabled).\n"
+                "5. Absolutely NO generic ritual steps, DIY instructions, ritual materials/items, mantra lists, gemstone advice, or lengthy astrology explanations.\n"
+                "6. DO NOT show dates (such as calendar dates or years) or non-INR prices.\n"
+                "7. Never claim any product is currently purchasable, in stock, or that links are verified.\n"
+                "8. Do not invent products, prices, inclusions, or availability."
             )
 
             user_prompt = (

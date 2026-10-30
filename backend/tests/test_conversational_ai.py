@@ -222,7 +222,7 @@ async def test_openai_llm_conversational_integration(monkeypatch):
     """
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "test-sk-openai-key-123456789")
     monkeypatch.setattr(settings, "OPENAI_MODEL", "gpt-4o-mini")
-    monkeypatch.setattr(settings, "RAG_ENABLED", False)
+    monkeypatch.setattr(settings, "RAG_ENABLED", True)
 
     simulated_ai_response = (
         "Namaste! According to Vedic Astrology, the 10th House (Karma Bhava) governs your profession, "
@@ -240,7 +240,15 @@ async def test_openai_llm_conversational_integration(monkeypatch):
         }]
     }
 
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+    mock_rag_docs = [{
+        "title": "10th House (Karma Bhava)",
+        "source": "https://www.astroved.com/articles/12-houses-in-vedic-astrology",
+        "document_id": "doc_10th_house",
+        "content": "10th House represents career and public life."
+    }]
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post, \
+         patch.object(knowledge_service, "retrieve", return_value=mock_rag_docs):
         mock_post.return_value = mock_resp
 
         history = [
@@ -256,7 +264,7 @@ async def test_openai_llm_conversational_integration(monkeypatch):
         assert is_mock is False
         assert "10th House" in reply
         assert "Karma Bhava" in reply
-        # Matched starter FAQ reference is passed and cited
+        # Matched knowledge service reference is passed and cited
         assert len(sources) > 0
         assert "astroved.com" in sources[0]["source"].lower()
         assert mock_post.called
@@ -385,25 +393,40 @@ def test_starter_faq_matching_service():
 
 
 @pytest.mark.asyncio
-async def test_offline_faq_fallback_when_openai_not_configured(monkeypatch):
+async def test_offline_behavior_when_openai_not_configured(monkeypatch):
     """
-    Verifies that when OPENAI_API_KEY is empty (development/offline mode),
-    asking an astrology question matching a starter FAQ returns a grounded summary
-    with source citation instead of failing or producing an empty response.
+    Verifies that when OPENAI_API_KEY is empty (development/offline mode):
+    - Without RAG or when no docs match, returns TEMPORARY_UNAVAILABLE_MESSAGE (does not use mock FAQ).
+    - When RAG is enabled with retrieved approved docs, formats grounded citation.
     """
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
     monkeypatch.setattr(settings, "RAG_ENABLED", False)
 
+    # 1. Without RAG -> TEMPORARY_UNAVAILABLE_MESSAGE (mock FAQ removed from runtime)
     reply, is_mock, sources = await llm_service.get_response(
         "What is Vedic Astrology?"
     )
-
     assert is_mock is True
-    assert "Jyotish" in reply
-    assert "Source:" in reply
-    assert "astroved.com/articles/what-is-vedic-astrology" in reply
-    assert len(sources) > 0
-    assert sources[0]["source"] == "https://www.astroved.com/articles/what-is-vedic-astrology"
+    assert reply == TEMPORARY_UNAVAILABLE_MESSAGE
+    assert sources == []
+
+    # 2. With RAG and retrieved approved document -> grounded citation
+    monkeypatch.setattr(settings, "RAG_ENABLED", True)
+    mock_rag_docs = [{
+        "title": "What is Vedic Astrology (Jyotish)?",
+        "source": "https://www.astroved.com/articles/what-is-vedic-astrology",
+        "document_id": "doc_jyotish",
+        "content": "Vedic Astrology, traditionally named Jyotish, is an ancient sacred science."
+    }]
+    with patch.object(knowledge_service, "retrieve", return_value=mock_rag_docs):
+        reply_rag, is_mock_rag, sources_rag = await llm_service.get_response(
+            "What is Vedic Astrology?"
+        )
+        assert is_mock_rag is True
+        assert "Jyotish" in reply_rag
+        assert "Source:" in reply_rag
+        assert "astroved.com/articles/what-is-vedic-astrology" in reply_rag
+        assert len(sources_rag) > 0
 
 
 @pytest.mark.asyncio

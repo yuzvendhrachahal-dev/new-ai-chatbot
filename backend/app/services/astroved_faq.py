@@ -1,7 +1,7 @@
 """
-AstroVed Starter FAQ and Reference Knowledge Module.
-Provides concise, original, grounded Vedic Astrology summaries based on publicly available
-AstroVed.com articles to serve as reference context for conversational AI.
+AstroVed Starter FAQ and Reference Knowledge Module (Test Fixture / Reference Only).
+Retained for automated test suites and educational reference.
+Decoupled from runtime RAG retrieval: not used as an active RAG knowledge source.
 """
 
 import re

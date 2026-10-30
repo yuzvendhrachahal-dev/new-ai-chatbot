@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { CustomerLead, MessageItem } from '../types';
 import { chatApi } from '../api';
 import { ASTROVED_LOGO } from '../assets/logo';
+import { MessageRenderer } from './MessageRenderer';
 import '../styles/customer-chatbot.css';
 
 interface CustomerChatbotProps {
@@ -9,15 +10,6 @@ interface CustomerChatbotProps {
 }
 
 type ChatScreenState = 'registration' | 'chat' | 'crm' | 'ended';
-
-const QUICK_OPTIONS = [
-  "🌙Today's Horoscope",
-  "📊Free Birth Chart",
-  "💑Compatibility Match",
-  "💳 Payment Issue",
-  "🤝 Talk to Human",
-  "🌿Remedies"
-];
 
 const COUNTRY_CODES = [
   { code: '+91', label: '🇮🇳 +91' },
@@ -186,7 +178,29 @@ export const CustomerChatbot: React.FC<CustomerChatbotProps> = () => {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const isAtBottomRef = useRef<boolean>(true);
+  const [showJumpToBottom, setShowJumpToBottom] = useState<boolean>(false);
+  const prevMessagesCountRef = useRef<number>(0);
+
+  const handleScroll = () => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const threshold = 70; // px threshold from bottom
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const isBottom = distanceFromBottom <= threshold;
+    isAtBottomRef.current = isBottom;
+    if (isBottom) {
+      setShowJumpToBottom(false);
+    }
+  };
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+    setShowJumpToBottom(false);
+    isAtBottomRef.current = true;
+  };
 
   // Starfield animation
   useEffect(() => {
@@ -236,12 +250,21 @@ export const CustomerChatbot: React.FC<CustomerChatbotProps> = () => {
     };
   }, []);
 
-  // Auto-scroll messages
+  // Smart scroll preservation: Auto-scroll only when user is near bottom; preserve position if reading history
   useEffect(() => {
-    if (screen === 'chat') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (screen !== 'chat') return;
+
+    const prevCount = prevMessagesCountRef.current;
+    const currentCount = messages.length;
+    const hasNewMessages = currentCount > prevCount;
+    prevMessagesCountRef.current = currentCount;
+
+    if (prevCount === 0 || isAtBottomRef.current) {
+      scrollToBottom('smooth');
+    } else if (hasNewMessages) {
+      setShowJumpToBottom(true);
     }
-  }, [messages, isTyping, screen]);
+  }, [messages, screen]);
 
   // Check and restore saved session from storage
   useEffect(() => {
@@ -932,7 +955,7 @@ export const CustomerChatbot: React.FC<CustomerChatbotProps> = () => {
             </div>
           )}
 
-          <div id="msgs">
+          <div id="msgs" ref={messagesContainerRef} onScroll={handleScroll}>
             {/* Welcome Hero Banner */}
             <div className="wcard welcome-hero">
               <img src={ASTROVED_LOGO} className="hero-logo" alt="AstroVed" />
@@ -949,35 +972,6 @@ export const CustomerChatbot: React.FC<CustomerChatbotProps> = () => {
                   <li>• Gemstones</li>
                 </ul>
               </div>
-            </div>
-
-            {/* Quick Option Prompt Chips */}
-            <div className="opt-btns" style={{ marginBottom: 12 }}>
-              {QUICK_OPTIONS.map(opt => (
-                <button
-                  key={opt}
-                  className="opt-btn"
-                  onClick={() => {
-                    if (opt.includes('Talk to Human')) {
-                      handleRequestHumanSupport('Live Advisor Request');
-                    } else if (opt.includes('Payment Issue')) {
-                      handleSendMessage('Payment issue with my order');
-                    } else if (opt.includes("Today's Horoscope")) {
-                      handleSendMessage("Today's Horoscope");
-                    } else if (opt.includes('Free Birth Chart')) {
-                      handleSendMessage('Free Birth Chart');
-                    } else if (opt.includes('Compatibility Match')) {
-                      handleSendMessage('Compatibility Match');
-                    } else if (opt.includes('Remedies')) {
-                      handleSendMessage('Remedies');
-                    } else {
-                      handleSendMessage(opt);
-                    }
-                  }}
-                >
-                  {opt}
-                </button>
-              ))}
             </div>
 
             {/* Messages Stream */}
@@ -1000,7 +994,7 @@ export const CustomerChatbot: React.FC<CustomerChatbotProps> = () => {
                           ✦ AstroVed Live Advisor
                         </div>
                       )}
-                      {renderCleanText(m.text)}
+                      <MessageRenderer text={m.text} />
                     </div>
                   </div>
                 );
@@ -1024,6 +1018,18 @@ export const CustomerChatbot: React.FC<CustomerChatbotProps> = () => {
             )}
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Jump to Latest Messages Button */}
+          {showJumpToBottom && (
+            <button
+              type="button"
+              className="jump-to-bottom-btn"
+              onClick={() => scrollToBottom('smooth')}
+              aria-label="Jump to latest messages"
+            >
+              New messages ↓
+            </button>
+          )}
 
           {/* Input Bar */}
           <div className="ibar">

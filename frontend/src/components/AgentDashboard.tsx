@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ConversationSummary, ConversationDetail, AnalyticsData } from '../types';
 import { chatApi } from '../api';
 import { ASTROVED_LOGO } from '../assets/logo';
+import { MessageRenderer } from './MessageRenderer';
 import '../styles/agent-dashboard.css';
 
 interface AgentDashboardProps {
@@ -47,6 +48,29 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
 
   const chatBodyRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLInputElement | null>(null);
+  const isAgentAtBottomRef = useRef<boolean>(true);
+  const [showAgentJump, setShowAgentJump] = useState<boolean>(false);
+  const prevAgentMsgCountRef = useRef<number>(0);
+
+  const handleAgentScroll = () => {
+    const el = chatBodyRef.current;
+    if (!el) return;
+    const threshold = 70;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const isBottom = distanceFromBottom <= threshold;
+    isAgentAtBottomRef.current = isBottom;
+    if (isBottom) {
+      setShowAgentJump(false);
+    }
+  };
+
+  const handleAgentJumpToLatest = () => {
+    if (chatBodyRef.current) {
+      chatBodyRef.current.scrollTo({ top: chatBodyRef.current.scrollHeight, behavior: 'smooth' });
+      setShowAgentJump(false);
+      isAgentAtBottomRef.current = true;
+    }
+  };
 
   // Push notifications
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => {
@@ -244,10 +268,20 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
     };
   }, [isLoggedIn, agentToken, activeSessionId]);
 
-  // Scroll messages to bottom on detail update
+  // Smart scroll messages to bottom on detail update: preserve scroll if agent is reading older history
   useEffect(() => {
+    const currentCount = activeDetail?.messages?.length || 0;
+    const prevCount = prevAgentMsgCountRef.current;
+    const hasNewMessages = currentCount > prevCount;
+    prevAgentMsgCountRef.current = currentCount;
+
     if (chatBodyRef.current) {
-      chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+      if (prevCount === 0 || isAgentAtBottomRef.current) {
+        chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+        setShowAgentJump(false);
+      } else if (hasNewMessages) {
+        setShowAgentJump(true);
+      }
     }
   }, [activeDetail]);
 
@@ -845,7 +879,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
                 </header>
 
                 {/* Message Timeline */}
-                <div className="message-timeline-body" ref={chatBodyRef}>
+                <div className="message-timeline-body" ref={chatBodyRef} onScroll={handleAgentScroll} style={{ position: 'relative' }}>
                   {isLoadingDetail && (!activeDetail.messages || activeDetail.messages.length === 0) ? (
                     <div className="system-pill-notice">Loading conversation history…</div>
                   ) : (
@@ -870,7 +904,7 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
                             className={`chat-msg-row ${isUser ? 'user' : isAgent ? 'agent' : 'bot'}`}
                           >
                             <div className="chat-msg-bubble">
-                              {m.text}
+                              <MessageRenderer text={m.text} />
                             </div>
                             <div className="chat-msg-meta">
                               {!isUser && !isAgent && (
@@ -891,6 +925,18 @@ export const AgentDashboard: React.FC<AgentDashboardProps> = () => {
                         </div>
                       )}
                     </>
+                  )}
+
+                  {showAgentJump && (
+                    <button
+                      type="button"
+                      className="jump-to-bottom-btn"
+                      style={{ position: 'sticky', bottom: '16px', margin: '0 auto' }}
+                      onClick={handleAgentJumpToLatest}
+                      aria-label="Jump to latest messages"
+                    >
+                      New messages ↓
+                    </button>
                   )}
                 </div>
 
